@@ -1,0 +1,14 @@
+{
+  "name": "@tradeflow/ui",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "react": "^19.0.1",
+    "lucide-react": "^0.546.0"
+  }
+}
