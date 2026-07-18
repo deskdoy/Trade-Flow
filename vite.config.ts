@@ -11,6 +11,7 @@ export default defineConfig(() => {
         '@': path.resolve(__dirname, '.'),
         '@tradeflow/shared': path.resolve(__dirname, 'packages/shared/src/index.ts'),
         '@tradeflow/chart-engine': path.resolve(__dirname, 'packages/chart-engine/src/index.ts'),
+        '@tradeflow/market-data': path.resolve(__dirname, 'packages/market-data/src/index.ts'),
       },
     },
     server: {

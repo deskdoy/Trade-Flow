@@ -24,6 +24,9 @@
       ],
       "@tradeflow/chart-engine": [
         "./packages/chart-engine/src/index.ts"
+      ],
+      "@tradeflow/market-data": [
+        "./packages/market-data/src/index.ts"
       ]
     },
     "allowImportingTsExtensions": true,

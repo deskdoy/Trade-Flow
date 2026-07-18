@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
   Server, 
   Cpu, 
@@ -15,10 +15,25 @@ import {
   CheckSquare, 
   Clock, 
   Compass,
-  TrendingUp
+  TrendingUp,
+  Sliders,
+  Terminal,
+  Zap,
+  Power,
+  RefreshCw,
+  HelpCircle,
+  FileText
 } from "lucide-react";
 import { Chart } from "@tradeflow/chart-engine";
-import { staticBtcCandles, staticEthCandles, staticSolCandles } from "./sampleData.ts";
+import { Candle } from "@tradeflow/shared";
+import { 
+  MarketDataEngine, 
+  MockProvider, 
+  BinanceProvider, 
+  MT5Provider, 
+  ReplayProvider, 
+  CSVProvider 
+} from "@tradeflow/market-data";
 
 interface SystemHealthInfo {
   status: "UP" | "DOWN";
@@ -38,17 +53,44 @@ interface SystemHealthInfo {
   version: string;
 }
 
+interface EventLog {
+  time: string;
+  type: string;
+  message: string;
+}
+
 export default function App() {
+  // System Health state from the API
   const [health, setHealth] = useState<SystemHealthInfo | null>(null);
   const [pingMs, setPingMs] = useState<number | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [fetchError, setFetchError] = useState<string | null>(null);
-  const [consecutiveFailures, setConsecutiveFailures] = useState(0);
+  const [isHealthLoading, setIsHealthLoading] = useState(true);
+  const [healthError, setHealthError] = useState<string | null>(null);
 
-  // Symbol and timeframe selection states for the Chart Engine
+  // Chart, Symbol, Timeframe Selection States
   const [selectedSymbol, setSelectedSymbol] = useState<"BTC/USD" | "ETH/USD" | "SOL/USD">("BTC/USD");
   const [selectedTimeframe, setSelectedTimeframe] = useState<"1D" | "4H" | "1H">("1D");
+  const [candles, setCandles] = useState<Candle[]>([]);
 
+  // Engine & Provider States
+  const [activeProviderId, setActiveProviderId] = useState<string>("mock");
+  const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [isSwitching, setIsSwitching] = useState<boolean>(false);
+  const [eventLogs, setEventLogs] = useState<EventLog[]>([]);
+
+  // Initialize the MarketDataEngine once
+  const engineRef = useRef<MarketDataEngine | null>(null);
+  if (!engineRef.current) {
+    const mock = new MockProvider();
+    const binance = new BinanceProvider();
+    const mt5 = new MT5Provider();
+    const replay = new ReplayProvider();
+    const csv = new CSVProvider();
+
+    // Register all providers in the engine
+    engineRef.current = new MarketDataEngine([mock, binance, mt5, replay, csv]);
+  }
+
+  // Poll server health diagnostics
   const fetchHealth = async () => {
     try {
       const startTime = performance.now();
@@ -62,38 +104,151 @@ export default function App() {
       const json = await res.json();
       if (json.success) {
         setHealth(json.data);
-        setFetchError(null);
-        setConsecutiveFailures(0);
+        setHealthError(null);
       } else {
         throw new Error(json.error?.message || "Invalid health response format");
       }
       setPingMs(Math.round(endTime - startTime));
-      setIsLoading(false);
+      setIsHealthLoading(false);
     } catch (err: any) {
-      console.warn("Health poll warning (retrying):", err);
-      setConsecutiveFailures((prev) => {
-        const next = prev + 1;
-        if (next >= 3) {
-          setFetchError(err.message || "Network connection failure");
-        }
-        return next;
-      });
-      setIsLoading(false);
+      console.warn("Health diagnostic ping warning:", err);
+      setHealthError(err.message || "Endpoint offline");
+      setIsHealthLoading(false);
     }
   };
 
   useEffect(() => {
     fetchHealth();
-    const interval = setInterval(fetchHealth, 5000);
+    const interval = setInterval(fetchHealth, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  // Format memory bytes to gigabytes
+  // Sync state & events between MarketDataEngine and React state
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+
+    const addLog = (type: string, message: string) => {
+      const time = new Date().toLocaleTimeString();
+      setEventLogs((prev) => [{ time, type, message }, ...prev].slice(0, 40));
+    };
+
+    // Event Handler: historyLoaded
+    const handleHistoryLoaded = (payload: { symbol: string; timeframe: string; candles: Candle[] }) => {
+      addLog("historyLoaded", `Retrieved ${payload.candles.length} candles for ${payload.symbol} [${payload.timeframe}]`);
+      if (payload.symbol === selectedSymbol && payload.timeframe === selectedTimeframe) {
+        setCandles(payload.candles);
+      }
+    };
+
+    // Event Handler: newCandle
+    const handleNewCandle = (payload: { symbol: string; timeframe: string; candle: Candle }) => {
+      const c = payload.candle;
+      addLog("newCandle", `Tick ${payload.symbol} (${payload.timeframe}) | O:${c.open.toFixed(2)} H:${c.high.toFixed(2)} L:${c.low.toFixed(2)} C:${c.close.toFixed(2)}`);
+      
+      if (payload.symbol === selectedSymbol && payload.timeframe === selectedTimeframe) {
+        setCandles((prev) => {
+          if (prev.length === 0) return [payload.candle];
+          const last = prev[prev.length - 1];
+          // If the candle has the same timestamp as the last, replace it. Otherwise, push it.
+          if (last.time === payload.candle.time) {
+            return [...prev.slice(0, -1), payload.candle];
+          } else {
+            return [...prev, payload.candle];
+          }
+        });
+      }
+    };
+
+    // Event Handler: providerChanged
+    const handleProviderChanged = (payload: { providerId: string; providerName: string }) => {
+      addLog("providerChanged", `Switched active provider to ${payload.providerName}`);
+      setIsConnected(engine.getActiveProvider()?.isConnected || false);
+    };
+
+    // Event Handler: connectionChanged
+    const handleConnectionChanged = (payload: { providerId: string; isConnected: boolean }) => {
+      addLog("connectionChanged", `Provider "${payload.providerId}" is now ${payload.isConnected ? "CONNECTED" : "DISCONNECTED"}`);
+      if (payload.providerId === engine.getActiveProvider()?.id) {
+        setIsConnected(payload.isConnected);
+      }
+    };
+
+    // Event Handler: error
+    const handleError = (payload: { providerId: string; message: string; error?: Error }) => {
+      addLog("error", `[${payload.providerId}] Error: ${payload.message}`);
+    };
+
+    // Register listeners
+    engine.on("historyLoaded", handleHistoryLoaded);
+    engine.on("newCandle", handleNewCandle);
+    engine.on("providerChanged", handleProviderChanged);
+    engine.on("connectionChanged", handleConnectionChanged);
+    engine.on("error", handleError);
+
+    // Initial configuration & activation
+    const currentActive = engine.getActiveProvider();
+    if (currentActive) {
+      setActiveProviderId(currentActive.id);
+      setIsConnected(currentActive.isConnected);
+    }
+
+    // Connect and subscribe for current selection
+    engine.connect().then(() => {
+      setIsConnected(engine.getActiveProvider()?.isConnected || false);
+      engine.subscribe(selectedSymbol, selectedTimeframe);
+      engine.getHistory(selectedSymbol, selectedTimeframe);
+    });
+
+    return () => {
+      // Cleanup events and subscription on selection change
+      engine.off("historyLoaded", handleHistoryLoaded);
+      engine.off("newCandle", handleNewCandle);
+      engine.off("providerChanged", handleProviderChanged);
+      engine.off("connectionChanged", handleConnectionChanged);
+      engine.off("error", handleError);
+      
+      engine.unsubscribe(selectedSymbol, selectedTimeframe);
+    };
+  }, [selectedSymbol, selectedTimeframe]);
+
+  // Handle manual provider swapping
+  const handleProviderSwap = async (providerId: string) => {
+    const engine = engineRef.current;
+    if (!engine || isSwitching) return;
+
+    try {
+      setIsSwitching(true);
+      await engine.switchProvider(providerId);
+      setActiveProviderId(providerId);
+    } catch (err: any) {
+      console.error("[App] Swapping provider failed:", err);
+    } finally {
+      setIsSwitching(false);
+    }
+  };
+
+  // Toggle active provider connectivity state
+  const handleToggleConnection = async () => {
+    const engine = engineRef.current;
+    if (!engine) return;
+
+    if (isConnected) {
+      await engine.disconnect();
+    } else {
+      await engine.connect();
+      // On reconnect, reload history
+      await engine.getHistory(selectedSymbol, selectedTimeframe);
+      engine.subscribe(selectedSymbol, selectedTimeframe);
+    }
+  };
+
+  // Format bytes to GB
   const formatGB = (bytes: number) => {
     return (bytes / (1024 * 1024 * 1024)).toFixed(2);
   };
 
-  // Format uptime in hh:mm:ss
+  // Format uptime
   const formatUptime = (seconds: number) => {
     const hrs = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
@@ -101,21 +256,15 @@ export default function App() {
     return `${hrs.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
-  // Static definition of packages for visualization
-  const packagesList = [
-    { name: "@tradeflow/shared", desc: "Common models, interfaces, validation schemas, and formatters.", status: "Core - Ready" },
-    { name: "@tradeflow/chart-engine", desc: "TradingView Lightweight Charts financial visualization component and engine.", status: "Core - Ready" },
-    { name: "@tradeflow/ui", desc: "Design system elements and shared interface visual components.", status: "Stubbed - Active" },
-    { name: "@tradeflow/indicators", desc: "Technical analysis mathematical algorithms.", status: "Stubbed - Active" },
-    { name: "@tradeflow/market-data", desc: "Standard feed interfaces and mock price streamers.", status: "Interface Ready" },
-    { name: "@tradeflow/broker", desc: "Brokerage connectors and trade executor wrappers.", status: "Interface Ready" },
-    { name: "@tradeflow/backtesting", desc: "Replay core evaluating past strategy models.", status: "Stubbed - Active" },
-    { name: "@tradeflow/strategy-engine", desc: "Automated trading logic orchestrators.", status: "Stubbed - Active" },
-    { name: "@tradeflow/alerts", desc: "Condition monitors raising notification triggers.", status: "Stubbed - Active" },
-    { name: "@tradeflow/storage", desc: "Database query abstractions and caching providers.", status: "Stubbed - Active" },
-    { name: "@tradeflow/authentication", desc: "Identity managers, token handlers, and secure rules.", status: "Stubbed - Active" },
-    { name: "@tradeflow/ai", desc: "Intelligent processing models and LLM adapters.", status: "Stubbed - Active" }
+  const providersConfig = [
+    { id: "mock", name: "Simulator Engine", desc: "Realistic price simulator. Generates live ticks every second.", isMock: true, active: true },
+    { id: "binance", name: "Binance Pro API", desc: "Production-grade exchange feed. [Restricted in Sprint 4]", isMock: false, active: false },
+    { id: "mt5", name: "MetaTrader 5 Connect", desc: "Enterprise multi-asset bridge. [Restricted in Sprint 4]", isMock: false, active: false },
+    { id: "replay", name: "Historical Replay", desc: "Backtesting simulator streaming history. [Restricted in Sprint 4]", isMock: false, active: false },
+    { id: "csv", name: "CSV File Ingestor", desc: "Parse custom datasets dynamically. [Restricted in Sprint 4]", isMock: false, active: false }
   ];
+
+  const activeProviderObj = providersConfig.find(p => p.id === activeProviderId);
 
   return (
     <div className="flex flex-col h-screen bg-brand-bg text-brand-text font-sans overflow-hidden">
@@ -127,58 +276,60 @@ export default function App() {
             TF
           </div>
           <div>
-            <h1 className="text-white font-bold tracking-tight text-sm">TradeFlow Engine</h1>
-            <p className="text-[10px] text-brand-text-muted uppercase font-mono tracking-wider">Refactoring Sprint & Diagnostics</p>
+            <div className="flex items-center space-x-2">
+              <h1 className="text-white font-bold tracking-tight text-sm">TradeFlow Engine</h1>
+              <span className="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold bg-brand-gold/10 text-brand-gold border border-brand-gold/20 uppercase">
+                Sprint 4 Active
+              </span>
+            </div>
+            <p className="text-[10px] text-brand-text-muted uppercase font-mono tracking-wider">Independent Market Data Hub</p>
           </div>
         </div>
 
         <div className="flex items-center space-x-4 text-xs">
-          {/* Connection Status Indicator */}
+          {/* Active Provider Connection Badge */}
           <div className="flex items-center space-x-2 px-3 py-1.5 bg-brand-panel rounded border border-brand-border">
             <span className={`w-2.5 h-2.5 rounded-full ${
-              fetchError 
-                ? "bg-brand-red animate-pulse" 
-                : consecutiveFailures > 0 
-                  ? "bg-brand-gold animate-pulse" 
-                  : "bg-brand-green"
+              isConnected 
+                ? "bg-brand-green animate-pulse" 
+                : "bg-brand-slate"
             }`} />
             <span className="font-mono text-white text-[11px] uppercase tracking-wider font-semibold">
-              {fetchError 
-                ? "API Offline" 
-                : consecutiveFailures > 0 
-                  ? "Reconnecting..." 
-                  : "API Online"}
+              {activeProviderObj?.name}: {isConnected ? "CONNECTED" : "OFFLINE"}
             </span>
           </div>
 
           {/* Latency ping indicator */}
-          {!fetchError && pingMs !== null && (
+          {!healthError && pingMs !== null && (
             <div className="hidden sm:flex items-center space-x-1.5 text-brand-text-muted font-mono text-[11px]">
               <Activity className="w-3.5 h-3.5 text-brand-gold" />
-              <span>Ping: {pingMs}ms</span>
+              <span>Diagnostic Ping: {pingMs}ms</span>
             </div>
           )}
         </div>
       </header>
 
-      {/* Main Panel */}
+      {/* Main Content Layout */}
       <div className="flex-1 flex overflow-hidden">
         
         {/* Workspace Display Area */}
         <main className="flex-1 overflow-y-auto p-6 grid grid-cols-1 xl:grid-cols-3 gap-6">
           
-          {/* Left Column: Diagnostics and Monorepo Overview */}
+          {/* Left Columns: Interactive Chart & Live Events Console */}
           <div className="xl:col-span-2 space-y-6">
             
-            {/* Chart Engine Hero Widget */}
+            {/* Interactive Chart Section */}
             <section className="bg-brand-panel border border-brand-border rounded-lg p-5 shadow-sm">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 border-b border-brand-border/40 pb-3 gap-3">
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-2.5">
                   <TrendingUp className="w-5 h-5 text-brand-gold" />
-                  <h2 className="text-sm font-bold text-white uppercase tracking-wider">Interactive Chart Engine</h2>
+                  <div>
+                    <h2 className="text-sm font-bold text-white uppercase tracking-wider">Financial Visualization</h2>
+                    <p className="text-[10px] text-brand-text-muted">Consuming abstract events from Market Data Engine</p>
+                  </div>
                 </div>
                 
-                {/* Symbol & Timeframe Selectors */}
+                {/* Control Panel: Symbol & Timeframe */}
                 <div className="flex items-center space-x-3">
                   {/* Symbol Selector */}
                   <div className="flex rounded bg-brand-bg p-0.5 border border-brand-border">
@@ -186,7 +337,7 @@ export default function App() {
                       <button
                         key={sym}
                         onClick={() => setSelectedSymbol(sym)}
-                        className={`px-2.5 py-1 text-[10px] font-mono font-bold rounded transition-all ${
+                        className={`px-3 py-1 text-[10px] font-mono font-bold rounded transition-all ${
                           selectedSymbol === sym
                             ? "bg-brand-gold text-brand-bg"
                             : "text-brand-text-muted hover:text-white"
@@ -216,240 +367,221 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Chart Component container */}
-              <div className="h-[420px] w-full">
-                <Chart
-                  candles={
-                    selectedSymbol === "BTC/USD"
-                      ? staticBtcCandles
-                      : selectedSymbol === "ETH/USD"
-                        ? staticEthCandles
-                        : staticSolCandles
-                  }
-                  symbol={selectedSymbol}
-                  timeframe={selectedTimeframe}
-                  theme="dark"
-                />
+              {/* Chart Component or Offline Notice */}
+              <div className="h-[400px] w-full relative bg-brand-bg rounded border border-brand-border/40 overflow-hidden">
+                {!isConnected ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center space-y-3 bg-brand-bg/95 z-10 text-center p-6">
+                    <Power className="w-10 h-10 text-brand-slate animate-pulse" />
+                    <h3 className="text-white text-xs uppercase font-bold tracking-wider">Feed Stream Offline</h3>
+                    <p className="text-[11px] text-brand-text-muted max-w-sm">
+                      The active provider is currently disconnected. Click "Connect Provider" in the control panel to start receiving real-time prices.
+                    </p>
+                    <button
+                      onClick={handleToggleConnection}
+                      className="px-4 py-1.5 bg-brand-gold hover:bg-brand-gold/90 text-brand-bg text-[11px] font-bold uppercase rounded tracking-wider shadow-sm transition"
+                    >
+                      Connect Provider
+                    </button>
+                  </div>
+                ) : candles.length === 0 ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center space-y-2 z-10">
+                    <RefreshCw className="w-6 h-6 text-brand-gold animate-spin" />
+                    <p className="text-[11px] text-brand-text-muted font-mono">Querying historical index...</p>
+                  </div>
+                ) : (
+                  <Chart
+                    candles={candles}
+                    symbol={selectedSymbol}
+                    timeframe={selectedTimeframe}
+                    theme="dark"
+                  />
+                )}
               </div>
             </section>
 
-            {/* Health Dashboard Card */}
-            <section className="bg-brand-panel border border-brand-border rounded-lg p-5 shadow-sm">
-              <div className="flex items-center justify-between mb-4 border-b border-brand-border/40 pb-3">
-                <div className="flex items-center space-x-2">
-                  <Server className="w-5 h-5 text-brand-gold" />
-                  <h2 className="text-sm font-bold text-white uppercase tracking-wider">Operational Diagnostics (Clean API)</h2>
-                </div>
-                <span className="text-xs text-brand-slate font-mono bg-brand-bg px-2 py-0.5 rounded border border-brand-border">
-                  GET /api/health
-                </span>
-              </div>
-
-              {isLoading && !health ? (
-                <div className="py-6 flex flex-col items-center justify-center space-y-2 text-brand-text-muted">
-                  <div className="w-6 h-6 border-2 border-brand-gold border-t-transparent rounded-full animate-spin" />
-                  <p className="text-xs font-mono">Querying active endpoint...</p>
-                </div>
-              ) : fetchError ? (
-                <div className="p-4 bg-brand-red/10 border border-brand-red/30 rounded-lg text-brand-red text-xs space-y-1">
-                  <p className="font-bold uppercase tracking-wider flex items-center space-x-1.5">
-                    <span>Diagnostic query unsuccessful</span>
-                  </p>
-                  <p className="font-mono text-[11px]">{fetchError}</p>
-                </div>
-              ) : health ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Left Specs */}
-                  <div className="space-y-3 bg-brand-bg/50 border border-brand-border/50 p-4 rounded-lg">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="text-brand-text-muted">System State:</span>
-                      <span className="text-brand-green font-mono font-bold bg-brand-green/10 px-1.5 py-0.5 rounded">
-                        {health.status}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="text-brand-text-muted">Uptime:</span>
-                      <span className="text-white font-mono">{formatUptime(health.uptimeSeconds)}</span>
-                    </div>
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="text-brand-text-muted">Node Version:</span>
-                      <span className="text-white font-mono">v{health.version}</span>
-                    </div>
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="text-brand-text-muted">OS Platform:</span>
-                      <span className="text-white font-mono uppercase text-[10px] bg-brand-border px-1.5 py-0.5 rounded">
-                        {health.system.platform}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Right Specs */}
-                  <div className="space-y-3 bg-brand-bg/50 border border-brand-border/50 p-4 rounded-lg">
-                    {/* CPU Count */}
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="text-brand-text-muted flex items-center space-x-1.5">
-                        <Cpu className="w-3.5 h-3.5 text-brand-slate" />
-                        <span>CPU Cores:</span>
-                      </span>
-                      <span className="text-white font-mono font-semibold">{health.system.cpuCount}</span>
-                    </div>
-
-                    {/* Database provider */}
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="text-brand-text-muted flex items-center space-x-1.5">
-                        <Database className="w-3.5 h-3.5 text-brand-slate" />
-                        <span>SQL Store:</span>
-                      </span>
-                      <span className="text-brand-text font-mono text-[10px] flex items-center space-x-1.5">
-                        <span className="text-brand-slate">({health.database.provider})</span>
-                        <span className="text-brand-red font-semibold uppercase bg-brand-red/10 px-1.5 py-0.5 rounded">Offline</span>
-                      </span>
-                    </div>
-
-                    {/* Memory usage bar */}
-                    <div className="text-xs space-y-1.5 pt-1">
-                      <div className="flex justify-between text-[11px]">
-                        <span className="text-brand-text-muted">Allocated RAM:</span>
-                        <span className="text-white font-mono font-semibold">
-                          {formatGB(health.system.memoryTotal - health.system.memoryFree)} / {formatGB(health.system.memoryTotal)} GB
-                        </span>
-                      </div>
-                      <div className="w-full bg-brand-border h-1.5 rounded-full overflow-hidden">
-                        <div 
-                          className="bg-brand-gold h-full" 
-                          style={{ width: `${((health.system.memoryTotal - health.system.memoryFree) / health.system.memoryTotal) * 100}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-            </section>
-
-            {/* Packages Hub */}
+            {/* Live Events Terminal Console */}
             <section className="bg-brand-panel border border-brand-border rounded-lg p-5">
-              <div className="flex items-center space-x-2 mb-4 border-b border-brand-border/40 pb-3">
-                <Layers className="w-5 h-5 text-brand-gold" />
-                <h2 className="text-sm font-bold text-white uppercase tracking-wider">Packages Workspace Hub (@tradeflow/*)</h2>
+              <div className="flex items-center justify-between mb-3 border-b border-brand-border/40 pb-3">
+                <div className="flex items-center space-x-2">
+                  <Terminal className="w-5 h-5 text-brand-gold" />
+                  <div>
+                    <h2 className="text-xs font-bold text-white uppercase tracking-wider">Market Event Dispatch Bus</h2>
+                    <p className="text-[9px] text-brand-text-muted">Real-time callbacks captured from the type-safe event model</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setEventLogs([])}
+                  className="text-[10px] text-brand-slate hover:text-white underline font-mono cursor-pointer"
+                >
+                  Clear Bus
+                </button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                {packagesList.map((pkg) => (
-                  <div 
-                    key={pkg.name} 
-                    className="p-3 bg-brand-bg/40 border border-brand-border hover:border-brand-slate rounded transition duration-150 flex flex-col justify-between"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <h3 className="font-mono text-xs font-bold text-white">{pkg.name}</h3>
-                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold uppercase tracking-wider ${
-                          pkg.status.includes("Ready") 
-                            ? "bg-brand-green/10 text-brand-green border border-brand-green/20" 
-                            : "bg-brand-gold/10 text-brand-gold border border-brand-gold/20"
-                        }`}>
-                          {pkg.status}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-brand-text-muted leading-relaxed">{pkg.desc}</p>
-                    </div>
+              {/* Console Logs */}
+              <div className="bg-brand-bg border border-brand-border/60 rounded p-4 h-[240px] overflow-y-auto font-mono text-[11px] text-brand-text-muted space-y-2 select-all">
+                {eventLogs.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-brand-slate text-[10px]">
+                    &gt; No events emitted yet. Toggle options above or wait for ticks...
                   </div>
-                ))}
+                ) : (
+                  eventLogs.map((log, idx) => (
+                    <div key={idx} className="flex items-start space-x-2 border-b border-brand-border/20 pb-1.5 last:border-0">
+                      <span className="text-brand-slate flex-shrink-0">[{log.time}]</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase flex-shrink-0 tracking-wider ${
+                        log.type === "newCandle" 
+                          ? "bg-brand-green/10 text-brand-green" 
+                          : log.type === "historyLoaded" 
+                            ? "bg-blue-500/10 text-blue-400" 
+                            : log.type === "providerChanged" 
+                              ? "bg-brand-gold/10 text-brand-gold" 
+                              : "bg-red-500/10 text-red-400"
+                      }`}>
+                        {log.type}
+                      </span>
+                      <span className="text-white leading-relaxed">{log.message}</span>
+                    </div>
+                  ))
+                )}
               </div>
             </section>
           </div>
 
-          {/* Right Column: Monorepo Architecture Overview & Future Roadmap */}
+          {/* Right Column: Engine Controls, Diagnostics, & Architectural Spec */}
           <div className="space-y-6">
             
-            {/* Sprint Overview Card */}
+            {/* Market Engine Control Hub */}
+            <section className="bg-brand-panel border border-brand-border rounded-lg p-5">
+              <div className="flex items-center space-x-2 mb-3 border-b border-brand-border/40 pb-2.5">
+                <Sliders className="w-5 h-5 text-brand-gold" />
+                <h2 className="text-xs font-bold text-white uppercase tracking-wider">Engine Provider Control</h2>
+              </div>
+
+              <div className="space-y-4">
+                {/* Connection switch */}
+                <div className="flex items-center justify-between p-3 bg-brand-bg/40 border border-brand-border rounded">
+                  <div>
+                    <h3 className="text-xs font-bold text-white">Active Channel Status</h3>
+                    <p className="text-[10px] text-brand-text-muted">Turn off simulation or API connections</p>
+                  </div>
+                  <button
+                    onClick={handleToggleConnection}
+                    className={`p-2 rounded-full cursor-pointer transition ${
+                      isConnected 
+                        ? "bg-brand-green/20 text-brand-green hover:bg-brand-green/30" 
+                        : "bg-brand-slate/20 text-brand-slate hover:bg-brand-slate/30"
+                    }`}
+                  >
+                    <Power className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Provider List Selection */}
+                <div className="space-y-2">
+                  <label className="text-[10px] text-brand-text-muted font-bold uppercase tracking-wider">Select Engine Provider</label>
+                  <div className="space-y-2">
+                    {providersConfig.map((p) => {
+                      const isSelected = activeProviderId === p.id;
+                      return (
+                        <div 
+                          key={p.id}
+                          onClick={() => !isSwitching && handleProviderSwap(p.id)}
+                          className={`p-3 rounded border text-left cursor-pointer transition flex flex-col justify-between ${
+                            isSelected 
+                              ? "bg-brand-gold/10 border-brand-gold text-white" 
+                              : "bg-brand-bg/40 border-brand-border text-brand-text-muted hover:border-brand-slate"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-bold font-mono">{p.name}</span>
+                            <span className={`text-[8px] px-1.5 py-0.2 rounded font-mono uppercase tracking-wider ${
+                              p.isMock 
+                                ? "bg-brand-green/10 text-brand-green border border-brand-green/25" 
+                                : "bg-brand-slate/20 text-brand-slate border border-brand-border"
+                            }`}>
+                              {p.isMock ? "Active Feed" : "Restricted placeholder"}
+                            </span>
+                          </div>
+                          <p className="text-[10px] leading-relaxed text-brand-text-muted">{p.desc}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* Engine Architecture & Event Patterns Spec */}
             <section className="bg-brand-panel border border-brand-border rounded-lg p-5">
               <div className="flex items-center space-x-2 mb-3 text-brand-gold">
-                <CheckSquare className="w-5 h-5" />
-                <h2 className="text-xs font-bold text-white uppercase tracking-wider">Sprint Accomplishments</h2>
+                <BookOpen className="w-5 h-5" />
+                <h2 className="text-xs font-bold text-white uppercase tracking-wider">Architecture Spec Guide</h2>
               </div>
-              <ul className="space-y-3 text-xs leading-relaxed">
-                <li className="flex items-start space-x-2.5">
-                  <CheckCircle2 className="w-4 h-4 text-brand-green mt-0.5 flex-shrink-0" />
-                  <div>
-                    <strong className="text-brand-text block">Sprint 3: TradeFlow Chart Engine</strong>
-                    <span className="text-brand-text-muted">Built a clean, reusable lightweight chart package featuring pan, zoom, native responsive resize, and symbol selection.</span>
-                  </div>
-                </li>
-                <li className="flex items-start space-x-2.5">
-                  <CheckCircle2 className="w-4 h-4 text-brand-green mt-0.5 flex-shrink-0" />
-                  <div>
-                    <strong className="text-brand-text block">Monorepo Setup Complete</strong>
-                    <span className="text-brand-text-muted">Repository migrated to a real pnpm workspace, standardizing apps/ and packages/ directories.</span>
-                  </div>
-                </li>
-                <li className="flex items-start space-x-2.5">
-                  <CheckCircle2 className="w-4 h-4 text-brand-green mt-0.5 flex-shrink-0" />
-                  <div>
-                    <strong className="text-brand-text block">Clean API Architecture</strong>
-                    <span className="text-brand-text-muted">Refactored apps/api into clean layers: domain, application, infrastructure, and interfaces.</span>
-                  </div>
-                </li>
-                <li className="flex items-start space-x-2.5">
-                  <CheckCircle2 className="w-4 h-4 text-brand-green mt-0.5 flex-shrink-0" />
-                  <div>
-                    <strong className="text-brand-text block">Dependency Injection Container</strong>
-                    <span className="text-brand-text-muted">Established a lightweight static services container with factory functions for loose coupling.</span>
-                  </div>
-                </li>
-              </ul>
-            </section>
-
-            {/* Visual Workspace Folder Tree */}
-            <section className="bg-brand-panel border border-brand-border rounded-lg p-5">
-              <div className="flex items-center space-x-2 mb-3">
-                <FolderTree className="w-5 h-5 text-brand-gold" />
-                <h2 className="text-xs font-bold text-white uppercase tracking-wider">Monorepo File Structure</h2>
-              </div>
-              <div className="bg-brand-bg/50 border border-brand-border/40 p-4 rounded font-mono text-[11px] text-brand-text-muted space-y-1.5 overflow-x-auto">
-                <div>📁 tradeflow/</div>
-                <div className="pl-4">📁 apps/</div>
-                <div className="pl-8 text-white">📁 api/ <span className="text-[10px] text-brand-gold">(Clean Layered Architecture)</span></div>
-                <div className="pl-12 text-brand-slate">├── 📁 application/</div>
-                <div className="pl-12 text-brand-slate">├── 📁 domain/</div>
-                <div className="pl-12 text-brand-slate">├── 📁 infrastructure/</div>
-                <div className="pl-12 text-brand-slate">└── 📁 interfaces/</div>
-                <div className="pl-8 text-white">📁 web/ <span className="text-[10px] text-brand-gold">(Diagnostics Dashboard)</span></div>
-                
-                <div className="pl-4">📁 packages/</div>
-                <div className="pl-8 text-brand-green">├── 📁 chart-engine/ <span className="text-[9px] text-brand-gold">(Lightweight Chart Component)</span></div>
-                <div className="pl-8 text-brand-green">├── 📁 shared/ <span className="text-[9px] text-brand-slate">(Centralized model schemas)</span></div>
-                <div className="pl-8 text-brand-slate">├── 📁 ui/</div>
-                <div className="pl-8 text-brand-slate">├── 📁 market-data/</div>
-                <div className="pl-8 text-brand-slate">├── 📁 broker/</div>
-                <div className="pl-8 text-brand-slate">└── 📁 [8 other core packages...]</div>
-                
-                <div className="pl-4 text-brand-gold">📄 pnpm-workspace.yaml</div>
-                <div className="pl-4">📄 package.json</div>
-              </div>
-            </section>
-
-            {/* Next Roadmaps */}
-            <section className="bg-brand-panel border border-brand-border rounded-lg p-5">
-              <div className="flex items-center space-x-2 mb-3">
-                <Clock className="w-5 h-5 text-brand-gold" />
-                <h2 className="text-xs font-bold text-white uppercase tracking-wider">Future Sprints Roadmap</h2>
-              </div>
-              <div className="space-y-4">
-                <div className="border-l-2 border-brand-gold pl-3.5 relative space-y-1">
-                  <div className="w-2 h-2 rounded-full bg-brand-gold absolute -left-[5px] top-1.5 animate-pulse" />
-                  <h4 className="text-xs font-bold text-white">Sprint 4: Indicators & Replay Mode</h4>
+              <div className="space-y-3.5 text-xs">
+                <div className="p-3 bg-brand-bg/50 border border-brand-border/40 rounded space-y-1.5">
+                  <h4 className="font-bold text-white text-[11px] flex items-center space-x-1.5">
+                    <Zap className="w-3.5 h-3.5 text-brand-gold" />
+                    <span>Clean Provider Separation</span>
+                  </h4>
                   <p className="text-[10px] text-brand-text-muted leading-relaxed">
-                    Set up mathematical logic wrappers for EMA, MACD, and RSI. Build historical simulation player controls.
+                    The visualization tier is completely decoupled. The <code className="font-mono text-white bg-brand-border px-1 rounded">ChartEngine</code> class only consumes an array of candles, and is oblivious to the source.
                   </p>
                 </div>
-                <div className="border-l-2 border-brand-border pl-3.5 relative space-y-1">
-                  <div className="w-2 h-2 rounded-full bg-brand-slate absolute -left-[5px] top-1.5" />
-                  <h4 className="text-xs font-bold text-brand-text-muted">Sprint 5: Brokerage Connectors</h4>
-                  <p className="text-[10px] text-brand-slate leading-relaxed">
-                    Integrate paper trading execution wrappers and live streaming Order Book components.
+
+                <div className="p-3 bg-brand-bg/50 border border-brand-border/40 rounded space-y-1.5">
+                  <h4 className="font-bold text-white text-[11px] flex items-center space-x-1.5">
+                    <FileText className="w-3.5 h-3.5 text-brand-gold" />
+                    <span>Contract Interface</span>
+                  </h4>
+                  <p className="text-[10px] text-brand-text-muted leading-relaxed">
+                    All provider models strictly implement the <code className="font-mono text-white bg-brand-border px-1 rounded">MarketDataProvider</code> interface contract, providing identical signatures for connection and subscribe streams.
                   </p>
                 </div>
               </div>
+            </section>
+
+            {/* Diagnostic Logs (Preserved from Sprint 3) */}
+            <section className="bg-brand-panel border border-brand-border rounded-lg p-5">
+              <div className="flex items-center justify-between mb-4 border-b border-brand-border/40 pb-3">
+                <div className="flex items-center space-x-2">
+                  <Server className="w-5 h-5 text-brand-gold" />
+                  <h2 className="text-xs font-bold text-white uppercase tracking-wider">Operational Diagnostics (API)</h2>
+                </div>
+                <span className="text-[10px] text-brand-slate font-mono bg-brand-bg px-2 py-0.5 rounded border border-brand-border">
+                  /api/health
+                </span>
+              </div>
+
+              {isHealthLoading && !health ? (
+                <div className="py-2 flex flex-col items-center justify-center space-y-2 text-brand-text-muted">
+                  <div className="w-5 h-5 border-2 border-brand-gold border-t-transparent rounded-full animate-spin" />
+                  <p className="text-[10px] font-mono">Pinging Node service...</p>
+                </div>
+              ) : healthError ? (
+                <div className="p-3 bg-brand-red/10 border border-brand-red/30 rounded text-brand-red text-[11px] font-mono">
+                  Diagnostics endpoint offline
+                </div>
+              ) : health ? (
+                <div className="space-y-2.5 font-mono text-[11px]">
+                  <div className="flex justify-between">
+                    <span className="text-brand-text-muted">Uptime:</span>
+                    <span className="text-white">{formatUptime(health.uptimeSeconds)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-brand-text-muted">OS Platform:</span>
+                    <span className="text-white uppercase text-[10px] bg-brand-border px-1.5 py-0.5 rounded">
+                      {health.system.platform}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-brand-text-muted">CPU Cores:</span>
+                    <span className="text-white">{health.system.cpuCount}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-brand-text-muted">Node version:</span>
+                    <span className="text-white">v{health.version}</span>
+                  </div>
+                </div>
+              ) : null}
             </section>
 
           </div>
