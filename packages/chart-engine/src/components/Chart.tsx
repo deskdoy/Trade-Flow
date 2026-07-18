@@ -2,11 +2,19 @@ import React, { useEffect, useRef } from "react";
 import { Candle } from "@tradeflow/shared";
 import { ChartEngine } from "../ChartEngine.ts";
 
+export interface ChartIndicatorData {
+  id: string;
+  name: string;
+  color: string;
+  points: { time: string; value: number }[];
+}
+
 export interface ChartProps {
   candles: Candle[];
   symbol: string;
   timeframe: string;
   theme?: "light" | "dark";
+  indicators?: ChartIndicatorData[];
 }
 
 export const Chart: React.FC<ChartProps> = ({
@@ -14,6 +22,7 @@ export const Chart: React.FC<ChartProps> = ({
   symbol,
   timeframe,
   theme = "dark",
+  indicators = [],
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartEngineRef = useRef<ChartEngine | null>(null);
@@ -28,8 +37,9 @@ export const Chart: React.FC<ChartProps> = ({
     const engine = new ChartEngine(containerRef.current, activeTheme);
     chartEngineRef.current = engine;
 
-    // Set initial candles data
+    // Set initial candles data and indicators
     engine.setCandles(candles);
+    engine.syncIndicators(indicators);
 
     // Setup ResizeObserver for responsive resizing
     const resizeObserver = new ResizeObserver((entries) => {
@@ -55,6 +65,13 @@ export const Chart: React.FC<ChartProps> = ({
       chartEngineRef.current.setCandles(candles);
     }
   }, [candles]);
+
+  // Update indicators when they change
+  useEffect(() => {
+    if (chartEngineRef.current) {
+      chartEngineRef.current.syncIndicators(indicators);
+    }
+  }, [indicators, candles]); // Also depend on candles in case candles change and we need to redraw the line (setData)
 
   const isDark = theme === "dark";
 

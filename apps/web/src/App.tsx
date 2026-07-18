@@ -24,7 +24,7 @@ import {
   HelpCircle,
   FileText
 } from "lucide-react";
-import { Chart } from "@tradeflow/chart-engine";
+import { Chart, ChartIndicatorData } from "@tradeflow/chart-engine";
 import { Candle } from "@tradeflow/shared";
 import { 
   MarketDataEngine, 
@@ -34,6 +34,7 @@ import {
   ReplayProvider, 
   CSVProvider 
 } from "@tradeflow/market-data";
+import { IndicatorEngine, SMAIndicator, EMAIndicator } from "@tradeflow/indicators";
 
 interface SystemHealthInfo {
   status: "UP" | "DOWN";
@@ -71,6 +72,13 @@ export default function App() {
   const [selectedTimeframe, setSelectedTimeframe] = useState<"1D" | "4H" | "1H">("1D");
   const [candles, setCandles] = useState<Candle[]>([]);
 
+  // Indicators State
+  const [activeIndicators, setActiveIndicators] = useState<{ sma20: boolean; ema50: boolean }>({
+    sma20: false,
+    ema50: false,
+  });
+  const [chartIndicators, setChartIndicators] = useState<ChartIndicatorData[]>([]);
+
   // Engine & Provider States
   const [activeProviderId, setActiveProviderId] = useState<string>("mock");
   const [isConnected, setIsConnected] = useState<boolean>(false);
@@ -89,6 +97,66 @@ export default function App() {
     // Register all providers in the engine
     engineRef.current = new MarketDataEngine([mock, binance, mt5, replay, csv]);
   }
+
+  // Initialize IndicatorEngine once
+  const indicatorEngineRef = useRef<IndicatorEngine | null>(null);
+  if (!indicatorEngineRef.current) {
+    indicatorEngineRef.current = new IndicatorEngine();
+  }
+
+  // Synchronize indicators registration and perform calculations
+  useEffect(() => {
+    const engine = indicatorEngineRef.current;
+    if (!engine) return;
+
+    const currentIndicators = engine.getIndicators();
+
+    // Manage SMA 20
+    const hasSma20 = currentIndicators.some((ind) => ind.id === "sma_20");
+    if (activeIndicators.sma20 && !hasSma20) {
+      engine.registerIndicator(new SMAIndicator("sma_20", { period: 20 }));
+    } else if (!activeIndicators.sma20 && hasSma20) {
+      engine.removeIndicator("sma_20");
+    }
+
+    // Manage EMA 50
+    const hasEma50 = currentIndicators.some((ind) => ind.id === "ema_50");
+    if (activeIndicators.ema50 && !hasEma50) {
+      engine.registerIndicator(new EMAIndicator("ema_50", { period: 50 }));
+    } else if (!activeIndicators.ema50 && hasEma50) {
+      engine.removeIndicator("ema_50");
+    }
+
+    // Trigger calculation if we have candles
+    if (candles.length > 0) {
+      const results = engine.calculateAll(candles, selectedSymbol, selectedTimeframe);
+      const chartDataList: ChartIndicatorData[] = [];
+
+      if (activeIndicators.sma20) {
+        const points = results.get("sma_20") || [];
+        chartDataList.push({
+          id: "sma_20",
+          name: "SMA (20)",
+          color: "#3b82f6", // elegant blue
+          points,
+        });
+      }
+
+      if (activeIndicators.ema50) {
+        const points = results.get("ema_50") || [];
+        chartDataList.push({
+          id: "ema_50",
+          name: "EMA (50)",
+          color: "#f59e0b", // elegant amber
+          points,
+        });
+      }
+
+      setChartIndicators(chartDataList);
+    } else {
+      setChartIndicators([]);
+    }
+  }, [candles, activeIndicators, selectedSymbol, selectedTimeframe]);
 
   // Poll server health diagnostics
   const fetchHealth = async () => {
@@ -394,6 +462,7 @@ export default function App() {
                     symbol={selectedSymbol}
                     timeframe={selectedTimeframe}
                     theme="dark"
+                    indicators={chartIndicators}
                   />
                 )}
               </div>
@@ -449,6 +518,57 @@ export default function App() {
           {/* Right Column: Engine Controls, Diagnostics, & Architectural Spec */}
           <div className="space-y-6">
             
+            {/* Indicator Control Hub */}
+            <section className="bg-brand-panel border border-brand-border rounded-lg p-5 shadow-sm">
+              <div className="flex items-center space-x-2 mb-3 border-b border-brand-border/40 pb-2.5 text-brand-gold">
+                <Sliders className="w-5 h-5" />
+                <h2 className="text-xs font-bold text-white uppercase tracking-wider">Indicator Engine Hub</h2>
+              </div>
+              <p className="text-[10px] text-brand-text-muted mb-4 leading-relaxed">
+                Enable technical indicators calculated in real-time by the modular Indicator Engine.
+              </p>
+
+              <div className="space-y-3">
+                {/* SMA Checkbox */}
+                <label className="flex items-start space-x-3 p-3 rounded bg-brand-bg/40 border border-brand-border/60 hover:border-brand-slate cursor-pointer select-none transition">
+                  <input
+                    type="checkbox"
+                    checked={activeIndicators.sma20}
+                    onChange={(e) => setActiveIndicators(prev => ({ ...prev, sma20: e.target.checked }))}
+                    className="w-4 h-4 rounded text-brand-gold focus:ring-brand-gold border-brand-border bg-brand-bg mt-0.5"
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-white">SMA (20)</span>
+                      <span className="text-[9px] font-mono font-bold text-blue-400 bg-blue-500/10 px-1.5 py-0.2 rounded border border-blue-500/20">
+                        Line: Blue
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-brand-text-muted mt-0.5">Simple Moving Average over a 20-period window</p>
+                  </div>
+                </label>
+
+                {/* EMA Checkbox */}
+                <label className="flex items-start space-x-3 p-3 rounded bg-brand-bg/40 border border-brand-border/60 hover:border-brand-slate cursor-pointer select-none transition">
+                  <input
+                    type="checkbox"
+                    checked={activeIndicators.ema50}
+                    onChange={(e) => setActiveIndicators(prev => ({ ...prev, ema50: e.target.checked }))}
+                    className="w-4 h-4 rounded text-brand-gold focus:ring-brand-gold border-brand-border bg-brand-bg mt-0.5"
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-white">EMA (50)</span>
+                      <span className="text-[9px] font-mono font-bold text-amber-500 bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20">
+                        Line: Gold
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-brand-text-muted mt-0.5">Exponential Moving Average over a 50-period window</p>
+                  </div>
+                </label>
+              </div>
+            </section>
+
             {/* Market Engine Control Hub */}
             <section className="bg-brand-panel border border-brand-border rounded-lg p-5">
               <div className="flex items-center space-x-2 mb-3 border-b border-brand-border/40 pb-2.5">

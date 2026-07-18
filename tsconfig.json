@@ -27,6 +27,9 @@
       ],
       "@tradeflow/market-data": [
         "./packages/market-data/src/index.ts"
+      ],
+      "@tradeflow/indicators": [
+        "./packages/indicators/src/index.ts"
       ]
     },
     "allowImportingTsExtensions": true,

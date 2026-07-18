@@ -12,6 +12,7 @@ export default defineConfig(() => {
         '@tradeflow/shared': path.resolve(__dirname, 'packages/shared/src/index.ts'),
         '@tradeflow/chart-engine': path.resolve(__dirname, 'packages/chart-engine/src/index.ts'),
         '@tradeflow/market-data': path.resolve(__dirname, 'packages/market-data/src/index.ts'),
+        '@tradeflow/indicators': path.resolve(__dirname, 'packages/indicators/src/index.ts'),
       },
     },
     server: {
