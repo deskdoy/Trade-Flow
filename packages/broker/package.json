@@ -1,5 +1,5 @@
 {
-  "name": "@tradeflow/indicators",
+  "name": "@tradeflow/broker",
   "version": "1.0.0",
   "private": true,
   "main": "src/index.ts",
@@ -7,5 +7,7 @@
   "scripts": {
     "build": "tsc"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@tradeflow/shared": "workspace:*"
+  }
 }

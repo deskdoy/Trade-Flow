@@ -1,6 +1,13 @@
 import path from "path";
+import express from "express";
 import { createServer as createViteServer } from "vite";
 import app from "./apps/api/src/app.ts";
+
+// Handle nested default exports from ESM/CJS interop
+let expressApp = app;
+while (expressApp && typeof expressApp !== "function" && (expressApp as any).default) {
+  expressApp = (expressApp as any).default;
+}
 
 async function startServer() {
   const PORT = 3000;
@@ -17,21 +24,21 @@ async function startServer() {
     });
     
     // Inject Vite middleware into our Express app instance
-    app.use(vite.middlewares);
+    expressApp.use(vite.middlewares);
   } else {
     console.log("[TradeFlow] Starting production server...");
     const distPath = path.join(process.cwd(), "dist");
     
     // Serve static files from compiled dist folder
-    app.use(app.get("express").static(distPath));
+    expressApp.use(express.static(distPath));
     
     // SPA fallback route
-    app.get("*", (req, res) => {
+    expressApp.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  expressApp.listen(PORT, "0.0.0.0", () => {
     console.log(`[TradeFlow] Core Engine online. Port: ${PORT}`);
     console.log(`[TradeFlow] Access url: http://localhost:${PORT}`);
   });

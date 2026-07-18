@@ -18,6 +18,9 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "@tradeflow/shared": [
+        "./packages/shared/src/index.ts"
       ]
     },
     "allowImportingTsExtensions": true,
