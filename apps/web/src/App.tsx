@@ -14,8 +14,11 @@ import {
   FolderTree, 
   CheckSquare, 
   Clock, 
-  Compass
+  Compass,
+  TrendingUp
 } from "lucide-react";
+import { Chart } from "@tradeflow/chart-engine";
+import { staticBtcCandles, staticEthCandles, staticSolCandles } from "./sampleData.ts";
 
 interface SystemHealthInfo {
   status: "UP" | "DOWN";
@@ -41,6 +44,10 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [consecutiveFailures, setConsecutiveFailures] = useState(0);
+
+  // Symbol and timeframe selection states for the Chart Engine
+  const [selectedSymbol, setSelectedSymbol] = useState<"BTC/USD" | "ETH/USD" | "SOL/USD">("BTC/USD");
+  const [selectedTimeframe, setSelectedTimeframe] = useState<"1D" | "4H" | "1H">("1D");
 
   const fetchHealth = async () => {
     try {
@@ -97,8 +104,8 @@ export default function App() {
   // Static definition of packages for visualization
   const packagesList = [
     { name: "@tradeflow/shared", desc: "Common models, interfaces, validation schemas, and formatters.", status: "Core - Ready" },
+    { name: "@tradeflow/chart-engine", desc: "TradingView Lightweight Charts financial visualization component and engine.", status: "Core - Ready" },
     { name: "@tradeflow/ui", desc: "Design system elements and shared interface visual components.", status: "Stubbed - Active" },
-    { name: "@tradeflow/chart-engine", desc: "High-frequency financial visualization modules.", status: "Stubbed - Active" },
     { name: "@tradeflow/indicators", desc: "Technical analysis mathematical algorithms.", status: "Stubbed - Active" },
     { name: "@tradeflow/market-data", desc: "Standard feed interfaces and mock price streamers.", status: "Interface Ready" },
     { name: "@tradeflow/broker", desc: "Brokerage connectors and trade executor wrappers.", status: "Interface Ready" },
@@ -163,6 +170,69 @@ export default function App() {
           {/* Left Column: Diagnostics and Monorepo Overview */}
           <div className="xl:col-span-2 space-y-6">
             
+            {/* Chart Engine Hero Widget */}
+            <section className="bg-brand-panel border border-brand-border rounded-lg p-5 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 border-b border-brand-border/40 pb-3 gap-3">
+                <div className="flex items-center space-x-2">
+                  <TrendingUp className="w-5 h-5 text-brand-gold" />
+                  <h2 className="text-sm font-bold text-white uppercase tracking-wider">Interactive Chart Engine</h2>
+                </div>
+                
+                {/* Symbol & Timeframe Selectors */}
+                <div className="flex items-center space-x-3">
+                  {/* Symbol Selector */}
+                  <div className="flex rounded bg-brand-bg p-0.5 border border-brand-border">
+                    {(["BTC/USD", "ETH/USD", "SOL/USD"] as const).map((sym) => (
+                      <button
+                        key={sym}
+                        onClick={() => setSelectedSymbol(sym)}
+                        className={`px-2.5 py-1 text-[10px] font-mono font-bold rounded transition-all ${
+                          selectedSymbol === sym
+                            ? "bg-brand-gold text-brand-bg"
+                            : "text-brand-text-muted hover:text-white"
+                        }`}
+                      >
+                        {sym.split("/")[0]}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Timeframe Selector */}
+                  <div className="flex rounded bg-brand-bg p-0.5 border border-brand-border">
+                    {(["1D", "4H", "1H"] as const).map((tf) => (
+                      <button
+                        key={tf}
+                        onClick={() => setSelectedTimeframe(tf)}
+                        className={`px-2.5 py-1 text-[10px] font-mono font-bold rounded transition-all ${
+                          selectedTimeframe === tf
+                            ? "bg-brand-gold text-brand-bg"
+                            : "text-brand-text-muted hover:text-white"
+                        }`}
+                      >
+                        {tf}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Chart Component container */}
+              <div className="h-[420px] w-full">
+                <Chart
+                  candles={
+                    selectedSymbol === "BTC/USD"
+                      ? staticBtcCandles
+                      : selectedSymbol === "ETH/USD"
+                        ? staticEthCandles
+                        : staticSolCandles
+                  }
+                  symbol={selectedSymbol}
+                  timeframe={selectedTimeframe}
+                  theme="dark"
+                />
+              </div>
+            </section>
+
             {/* Health Dashboard Card */}
             <section className="bg-brand-panel border border-brand-border rounded-lg p-5 shadow-sm">
               <div className="flex items-center justify-between mb-4 border-b border-brand-border/40 pb-3">
@@ -301,6 +371,13 @@ export default function App() {
                 <li className="flex items-start space-x-2.5">
                   <CheckCircle2 className="w-4 h-4 text-brand-green mt-0.5 flex-shrink-0" />
                   <div>
+                    <strong className="text-brand-text block">Sprint 3: TradeFlow Chart Engine</strong>
+                    <span className="text-brand-text-muted">Built a clean, reusable lightweight chart package featuring pan, zoom, native responsive resize, and symbol selection.</span>
+                  </div>
+                </li>
+                <li className="flex items-start space-x-2.5">
+                  <CheckCircle2 className="w-4 h-4 text-brand-green mt-0.5 flex-shrink-0" />
+                  <div>
                     <strong className="text-brand-text block">Monorepo Setup Complete</strong>
                     <span className="text-brand-text-muted">Repository migrated to a real pnpm workspace, standardizing apps/ and packages/ directories.</span>
                   </div>
@@ -319,13 +396,6 @@ export default function App() {
                     <span className="text-brand-text-muted">Established a lightweight static services container with factory functions for loose coupling.</span>
                   </div>
                 </li>
-                <li className="flex items-start space-x-2.5">
-                  <CheckCircle2 className="w-4 h-4 text-brand-green mt-0.5 flex-shrink-0" />
-                  <div>
-                    <strong className="text-brand-text block">Centralized Configuration</strong>
-                    <span className="text-brand-text-muted">Isolated app environment, logging drivers, and constants inside distinct config modules.</span>
-                  </div>
-                </li>
               </ul>
             </section>
 
@@ -339,17 +409,18 @@ export default function App() {
                 <div>📁 tradeflow/</div>
                 <div className="pl-4">📁 apps/</div>
                 <div className="pl-8 text-white">📁 api/ <span className="text-[10px] text-brand-gold">(Clean Layered Architecture)</span></div>
-                <div className="pl-12 text-brand-slate">├── 📁 application/ <span className="text-[9px] text-brand-slate">(Use cases)</span></div>
-                <div className="pl-12 text-brand-slate">├── 📁 domain/ <span className="text-[9px] text-brand-slate">(Entities & models)</span></div>
-                <div className="pl-12 text-brand-slate">├── 📁 infrastructure/ <span className="text-[9px] text-brand-slate">(DI & servers)</span></div>
-                <div className="pl-12 text-brand-slate">└── 📁 interfaces/ <span className="text-[9px] text-brand-slate">(Controllers & routes)</span></div>
+                <div className="pl-12 text-brand-slate">├── 📁 application/</div>
+                <div className="pl-12 text-brand-slate">├── 📁 domain/</div>
+                <div className="pl-12 text-brand-slate">├── 📁 infrastructure/</div>
+                <div className="pl-12 text-brand-slate">└── 📁 interfaces/</div>
                 <div className="pl-8 text-white">📁 web/ <span className="text-[10px] text-brand-gold">(Diagnostics Dashboard)</span></div>
                 
                 <div className="pl-4">📁 packages/</div>
+                <div className="pl-8 text-brand-green">├── 📁 chart-engine/ <span className="text-[9px] text-brand-gold">(Lightweight Chart Component)</span></div>
                 <div className="pl-8 text-brand-green">├── 📁 shared/ <span className="text-[9px] text-brand-slate">(Centralized model schemas)</span></div>
                 <div className="pl-8 text-brand-slate">├── 📁 ui/</div>
-                <div className="pl-8 text-brand-slate">├── 📁 market-data/ <span className="text-[9px] text-brand-slate">(Provider interfaces)</span></div>
-                <div className="pl-8 text-brand-slate">├── 📁 broker/ <span className="text-[9px] text-brand-slate">(Broker interfaces)</span></div>
+                <div className="pl-8 text-brand-slate">├── 📁 market-data/</div>
+                <div className="pl-8 text-brand-slate">├── 📁 broker/</div>
                 <div className="pl-8 text-brand-slate">└── 📁 [8 other core packages...]</div>
                 
                 <div className="pl-4 text-brand-gold">📄 pnpm-workspace.yaml</div>
@@ -364,18 +435,18 @@ export default function App() {
                 <h2 className="text-xs font-bold text-white uppercase tracking-wider">Future Sprints Roadmap</h2>
               </div>
               <div className="space-y-4">
-                <div className="border-l-2 border-brand-gold/30 pl-3.5 relative space-y-1">
-                  <div className="w-2 h-2 rounded-full bg-brand-gold absolute -left-[5px] top-1.5" />
-                  <h4 className="text-xs font-bold text-white">Sprint 3: Relational Persistence</h4>
+                <div className="border-l-2 border-brand-gold pl-3.5 relative space-y-1">
+                  <div className="w-2 h-2 rounded-full bg-brand-gold absolute -left-[5px] top-1.5 animate-pulse" />
+                  <h4 className="text-xs font-bold text-white">Sprint 4: Indicators & Replay Mode</h4>
                   <p className="text-[10px] text-brand-text-muted leading-relaxed">
-                    Set up PostgreSQL database schemas (Cloud SQL) and map persistent repositories in `@tradeflow/storage`.
+                    Set up mathematical logic wrappers for EMA, MACD, and RSI. Build historical simulation player controls.
                   </p>
                 </div>
                 <div className="border-l-2 border-brand-border pl-3.5 relative space-y-1">
                   <div className="w-2 h-2 rounded-full bg-brand-slate absolute -left-[5px] top-1.5" />
-                  <h4 className="text-xs font-bold text-brand-text-muted">Sprint 4: WebSocket Streamers</h4>
+                  <h4 className="text-xs font-bold text-brand-text-muted">Sprint 5: Brokerage Connectors</h4>
                   <p className="text-[10px] text-brand-slate leading-relaxed">
-                    Introduce live brokerage ticker client adaptors under `@tradeflow/market-data` for low-latency live quotes.
+                    Integrate paper trading execution wrappers and live streaming Order Book components.
                   </p>
                 </div>
               </div>

@@ -21,6 +21,9 @@
       ],
       "@tradeflow/shared": [
         "./packages/shared/src/index.ts"
+      ],
+      "@tradeflow/chart-engine": [
+        "./packages/chart-engine/src/index.ts"
       ]
     },
     "allowImportingTsExtensions": true,

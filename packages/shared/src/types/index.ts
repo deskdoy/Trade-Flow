@@ -56,3 +56,12 @@ export interface AccountInfo {
   freeMargin: number;
   currency: string;
 }
+
+export interface Candle {
+  time: string; // YYYY-MM-DD format or ISO string or string date
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+}

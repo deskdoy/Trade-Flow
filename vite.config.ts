@@ -9,6 +9,8 @@ export default defineConfig(() => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
+        '@tradeflow/shared': path.resolve(__dirname, 'packages/shared/src/index.ts'),
+        '@tradeflow/chart-engine': path.resolve(__dirname, 'packages/chart-engine/src/index.ts'),
       },
     },
     server: {

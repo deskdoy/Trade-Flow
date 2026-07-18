@@ -7,5 +7,7 @@
   "scripts": {
     "build": "tsc"
   },
-  "dependencies": {}
+  "dependencies": {
+    "lightweight-charts": "^4.2.1"
+  }
 }
