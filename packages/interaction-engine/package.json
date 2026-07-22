@@ -1,0 +1,16 @@
+{
+  "name": "@tradeflow/interaction-engine",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "test": "tsx src/__tests__/InteractionEngine.test.ts"
+  },
+  "dependencies": {
+    "@tradeflow/drawing-engine": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}
