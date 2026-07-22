@@ -9,12 +9,23 @@ export interface ChartIndicatorData {
   points: { time: string; value: number }[];
 }
 
+export interface ChartDrawingData {
+  id: string;
+  type: string;
+  points: { time: string; price: number }[];
+  color: string;
+  lineWidth: number;
+  selected: boolean;
+}
+
 export interface ChartProps {
   candles: Candle[];
   symbol: string;
   timeframe: string;
   theme?: "light" | "dark";
   indicators?: ChartIndicatorData[];
+  drawings?: ChartDrawingData[];
+  onChartClick?: (price: number, time: string) => void;
 }
 
 export const Chart: React.FC<ChartProps> = ({
@@ -23,6 +34,8 @@ export const Chart: React.FC<ChartProps> = ({
   timeframe,
   theme = "dark",
   indicators = [],
+  drawings = [],
+  onChartClick,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartEngineRef = useRef<ChartEngine | null>(null);
@@ -37,9 +50,16 @@ export const Chart: React.FC<ChartProps> = ({
     const engine = new ChartEngine(containerRef.current, activeTheme);
     chartEngineRef.current = engine;
 
-    // Set initial candles data and indicators
+    // Set initial candles data, indicators, and drawings
     engine.setCandles(candles);
     engine.syncIndicators(indicators);
+    engine.syncDrawings(drawings);
+
+    // Setup chart click subscription if callback provided
+    let unsubscribeClick: (() => void) | undefined;
+    if (onChartClick) {
+      unsubscribeClick = engine.subscribeClick(onChartClick);
+    }
 
     // Setup ResizeObserver for responsive resizing
     const resizeObserver = new ResizeObserver((entries) => {
@@ -54,10 +74,13 @@ export const Chart: React.FC<ChartProps> = ({
 
     return () => {
       resizeObserver.disconnect();
+      if (unsubscribeClick) {
+        unsubscribeClick();
+      }
       engine.destroy();
       chartEngineRef.current = null;
     };
-  }, [theme]); // Recreate chart if theme changes
+  }, [theme, onChartClick]); // Recreate chart if theme or click handler changes
 
   // Update candles when they change
   useEffect(() => {
@@ -72,6 +95,13 @@ export const Chart: React.FC<ChartProps> = ({
       chartEngineRef.current.syncIndicators(indicators);
     }
   }, [indicators, candles]); // Also depend on candles in case candles change and we need to redraw the line (setData)
+
+  // Update drawings when they change
+  useEffect(() => {
+    if (chartEngineRef.current) {
+      chartEngineRef.current.syncDrawings(drawings);
+    }
+  }, [drawings, candles]);
 
   const isDark = theme === "dark";
 

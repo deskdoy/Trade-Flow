@@ -5,6 +5,8 @@ export class ChartEngine {
   private chart: IChartApi | null = null;
   private candlestickSeries: ISeriesApi<"Candlestick"> | null = null;
   private lineSeries: Map<string, ISeriesApi<"Line">> = new Map();
+  private drawingSeries: Map<string, ISeriesApi<"Line">> = new Map();
+  private candleTimes: string[] = [];
   private container: HTMLElement;
 
   constructor(container: HTMLElement, theme: "light" | "dark" = "dark") {
@@ -110,7 +112,47 @@ export class ChartEngine {
       };
     });
 
+    this.candleTimes = sortedCandles.map((c) => c.time);
     this.candlestickSeries.setData(chartData);
+  }
+
+  /**
+   * Subscribes to chart clicks and maps them to price & time
+   */
+  public subscribeClick(callback: (price: number, time: string) => void): () => void {
+    if (!this.chart || !this.candlestickSeries) {
+      return () => {};
+    }
+
+    const handler = (param: any) => {
+      if (!param.point || !param.time) {
+        return;
+      }
+      const price = this.candlestickSeries!.coordinateToPrice(param.point.y);
+      if (price !== null) {
+        let timeStr = "";
+        if (typeof param.time === "object" && param.time !== null) {
+          const t = param.time as any;
+          const mm = String(t.month).padStart(2, "0");
+          const dd = String(t.day).padStart(2, "0");
+          timeStr = `${t.year}-${mm}-${dd}`;
+        } else if (typeof param.time === "number") {
+          const date = new Date(param.time * 1000);
+          timeStr = date.toISOString().split("T")[0];
+        } else {
+          timeStr = String(param.time);
+        }
+        callback(parseFloat(price.toFixed(4)), timeStr);
+      }
+    };
+
+    this.chart.subscribeClick(handler);
+
+    return () => {
+      if (this.chart) {
+        this.chart.unsubscribeClick(handler);
+      }
+    };
   }
 
   /**
@@ -119,6 +161,7 @@ export class ChartEngine {
   public destroy(): void {
     if (this.chart) {
       this.clearLineSeries();
+      this.clearDrawings();
       this.chart.remove();
       this.chart = null;
       this.candlestickSeries = null;
@@ -220,6 +263,31 @@ export class ChartEngine {
   }
 
   /**
+   * Synchronizes drawings on the chart
+   */
+  public syncDrawings(
+    drawings: { id: string; type: string; points: { time: string; price: number }[]; color: string; lineWidth: number; selected: boolean }[]
+  ): void {
+    const activeIds = new Set(drawings.map((d) => d.id));
+
+    // Remove any series no longer active
+    for (const id of Array.from(this.drawingSeries.keys())) {
+      if (!activeIds.has(id)) {
+        this.removeDrawing(id);
+      }
+    }
+
+    // Add or update active series
+    for (const d of drawings) {
+      this.addDrawing(d.id, d.type, d.points, {
+        color: d.color,
+        lineWidth: d.lineWidth,
+        selected: d.selected,
+      });
+    }
+  }
+
+  /**
    * Placeholder method to add indicator (not implemented in Sprint 3)
    */
   public addIndicator(type: string, options?: Record<string, unknown>): void {
@@ -236,18 +304,116 @@ export class ChartEngine {
   }
 
   /**
-   * Placeholder method to add drawing (not implemented in Sprint 3)
+   * Adds or updates a drawing series on the chart.
    */
-  public addDrawing(type: string, options?: Record<string, unknown>): void {
-    // Intentionally left empty as per Sprint 3 guidelines
-    console.log(`addDrawing placeholder called: ${type}`, options);
+  public addDrawing(
+    id: string,
+    type: string,
+    points: { time: string; price: number }[],
+    options?: { color?: string; lineWidth?: number; selected?: boolean }
+  ): void {
+    if (!this.chart) {
+      return;
+    }
+
+    if (this.drawingSeries.has(id)) {
+      this.updateDrawing(id, points, options);
+      return;
+    }
+
+    const isSelected = options?.selected || false;
+    const series = this.chart.addLineSeries({
+      color: options?.color || "#10b981",
+      lineWidth: ((options?.lineWidth || 2) + (isSelected ? 2 : 0)) as any,
+      lineStyle: isSelected ? 1 : 0, // dashed if selected, solid otherwise
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+
+    this.drawingSeries.set(id, series);
+    this.updateDrawing(id, points, options);
   }
 
   /**
-   * Placeholder method to remove drawing (not implemented in Sprint 3)
+   * Updates a drawing series' positions and styling on the chart.
+   */
+  public updateDrawing(
+    id: string,
+    points: { time: string; price: number }[],
+    options?: { color?: string; lineWidth?: number; selected?: boolean }
+  ): void {
+    const series = this.drawingSeries.get(id);
+    if (!series) {
+      return;
+    }
+
+    if (options) {
+      const isSelected = options.selected || false;
+      series.applyOptions({
+        color: options.color,
+        lineWidth: ((options.lineWidth || 2) + (isSelected ? 2 : 0)) as any,
+        lineStyle: isSelected ? 1 : 0,
+      });
+    }
+
+    const isHorizontal = points.length === 1 || points[0]?.time === "";
+    let dataPoints = points;
+    if (isHorizontal && this.candleTimes.length > 0 && points[0]) {
+      dataPoints = [
+        { time: this.candleTimes[0], price: points[0].price },
+        { time: this.candleTimes[this.candleTimes.length - 1], price: points[0].price },
+      ];
+    }
+
+    const seriesData = dataPoints.map((p) => {
+      let chartTime: Time;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(p.time)) {
+        chartTime = p.time;
+      } else {
+        const parsed = Date.parse(p.time);
+        if (!isNaN(parsed)) {
+          chartTime = (parsed / 1000) as Time;
+        } else {
+          chartTime = p.time as Time;
+        }
+      }
+
+      return {
+        time: chartTime,
+        value: p.price,
+      };
+    });
+
+    // Ensure strictly ordered data for lightweight-charts
+    seriesData.sort((a, b) => {
+      const tA = typeof a.time === "number" ? a.time : Date.parse(a.time as string);
+      const tB = typeof b.time === "number" ? b.time : Date.parse(b.time as string);
+      return tA - tB;
+    });
+
+    series.setData(seriesData);
+  }
+
+  /**
+   * Removes a drawing from the chart.
    */
   public removeDrawing(id: string): void {
-    // Intentionally left empty as per Sprint 3 guidelines
-    console.log(`removeDrawing placeholder called: ${id}`);
+    const series = this.drawingSeries.get(id);
+    if (series && this.chart) {
+      this.chart.removeSeries(series);
+      this.drawingSeries.delete(id);
+    }
+  }
+
+  /**
+   * Clears all drawings from the chart.
+   */
+  public clearDrawings(): void {
+    if (this.chart) {
+      for (const series of this.drawingSeries.values()) {
+        this.chart.removeSeries(series);
+      }
+    }
+    this.drawingSeries.clear();
   }
 }

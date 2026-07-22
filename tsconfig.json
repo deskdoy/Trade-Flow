@@ -30,6 +30,9 @@
       ],
       "@tradeflow/indicators": [
         "./packages/indicators/src/index.ts"
+      ],
+      "@tradeflow/drawing-engine": [
+        "./packages/drawing-engine/src/index.ts"
       ]
     },
     "allowImportingTsExtensions": true,

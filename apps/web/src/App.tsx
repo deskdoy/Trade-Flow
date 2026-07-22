@@ -24,7 +24,7 @@ import {
   HelpCircle,
   FileText
 } from "lucide-react";
-import { Chart, ChartIndicatorData } from "@tradeflow/chart-engine";
+import { Chart, ChartIndicatorData, ChartDrawingData } from "@tradeflow/chart-engine";
 import { Candle } from "@tradeflow/shared";
 import { 
   MarketDataEngine, 
@@ -35,6 +35,16 @@ import {
   CSVProvider 
 } from "@tradeflow/market-data";
 import { IndicatorEngine, SMAIndicator, EMAIndicator } from "@tradeflow/indicators";
+import { DrawingEngine, SerializedDrawing, DrawingPoint } from "@tradeflow/drawing-engine";
+import { 
+  MousePointer, 
+  Minus, 
+  Trash2, 
+  ArrowUp, 
+  ArrowDown, 
+  Save, 
+  FolderOpen 
+} from "lucide-react";
 
 interface SystemHealthInfo {
   status: "UP" | "DOWN";
@@ -79,6 +89,13 @@ export default function App() {
   });
   const [chartIndicators, setChartIndicators] = useState<ChartIndicatorData[]>([]);
 
+  // Drawing Engine States
+  const [activeTool, setActiveTool] = useState<"cursor" | "horizontal_line" | "trend_line">("cursor");
+  const [pendingPoints, setPendingPoints] = useState<DrawingPoint[]>([]);
+  const [drawingsList, setDrawingsList] = useState<SerializedDrawing[]>([]);
+  const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
+  const [serializedData, setSerializedData] = useState<string>("");
+
   // Engine & Provider States
   const [activeProviderId, setActiveProviderId] = useState<string>("mock");
   const [isConnected, setIsConnected] = useState<boolean>(false);
@@ -103,6 +120,57 @@ export default function App() {
   if (!indicatorEngineRef.current) {
     indicatorEngineRef.current = new IndicatorEngine();
   }
+
+  // Initialize DrawingEngine once
+  const drawingEngineRef = useRef<DrawingEngine | null>(null);
+  if (!drawingEngineRef.current) {
+    drawingEngineRef.current = new DrawingEngine();
+  }
+
+  // Bind DrawingEngine event listeners to sync state
+  useEffect(() => {
+    const drawingEngine = drawingEngineRef.current;
+    if (!drawingEngine) return;
+
+    const handleCreated = () => {
+      setDrawingsList(drawingEngine.getDrawings().map((d) => d.serialize()));
+    };
+    const handleUpdated = () => {
+      setDrawingsList(drawingEngine.getDrawings().map((d) => d.serialize()));
+    };
+    const handleRemoved = () => {
+      setDrawingsList(drawingEngine.getDrawings().map((d) => d.serialize()));
+    };
+    const handleSelected = (payload: { drawing: any }) => {
+      setSelectedDrawingId(payload.drawing ? payload.drawing.id : null);
+    };
+    const handleLoaded = () => {
+      setDrawingsList(drawingEngine.getDrawings().map((d) => d.serialize()));
+    };
+    const handleCleared = () => {
+      setDrawingsList([]);
+      setSelectedDrawingId(null);
+    };
+
+    drawingEngine.on("created", handleCreated);
+    drawingEngine.on("updated", handleUpdated);
+    drawingEngine.on("removed", handleRemoved);
+    drawingEngine.on("selected", handleSelected);
+    drawingEngine.on("loaded", handleLoaded);
+    drawingEngine.on("cleared", handleCleared);
+
+    // Initial load
+    setDrawingsList(drawingEngine.getDrawings().map((d) => d.serialize()));
+
+    return () => {
+      drawingEngine.off("created", handleCreated);
+      drawingEngine.off("updated", handleUpdated);
+      drawingEngine.off("removed", handleRemoved);
+      drawingEngine.off("selected", handleSelected);
+      drawingEngine.off("loaded", handleLoaded);
+      drawingEngine.off("cleared", handleCleared);
+    };
+  }, []);
 
   // Synchronize indicators registration and perform calculations
   useEffect(() => {
@@ -182,6 +250,102 @@ export default function App() {
       console.warn("Health diagnostic ping warning:", err);
       setHealthError(err.message || "Endpoint offline");
       setIsHealthLoading(false);
+    }
+  };
+
+  const handleChartClick = (price: number, time: string) => {
+    const drawingEngine = drawingEngineRef.current;
+    if (!drawingEngine) return;
+
+    if (activeTool === "horizontal_line") {
+      const id = `hl_${Date.now()}`;
+      drawingEngine.createDrawing("horizontal_line", id, [{ time, price }]);
+      setActiveTool("cursor");
+    } else if (activeTool === "trend_line") {
+      if (pendingPoints.length === 0) {
+        setPendingPoints([{ time, price }]);
+      } else {
+        const id = `tl_${Date.now()}`;
+        drawingEngine.createDrawing("trend_line", id, [pendingPoints[0], { time, price }]);
+        setPendingPoints([]);
+        setActiveTool("cursor");
+      }
+    } else if (activeTool === "cursor") {
+      const activeDrawings = drawingEngine.getDrawings();
+      let nearestId: string | null = null;
+      let minDistance = Infinity;
+
+      for (const d of activeDrawings) {
+        for (const pt of d.points) {
+          const dist = Math.abs(pt.price - price) / price;
+          if (dist < minDistance && dist < 0.05) {
+            minDistance = dist;
+            nearestId = d.id;
+          }
+        }
+      }
+
+      drawingEngine.selectDrawing(nearestId);
+    }
+  };
+
+  const handleNudge = (direction: "up" | "down") => {
+    const drawingEngine = drawingEngineRef.current;
+    if (!drawingEngine) return;
+
+    const selected = drawingEngine.getSelectedDrawing();
+    if (!selected) return;
+
+    const basePrice = selected.points[0]?.price || 100;
+    const delta = basePrice * 0.002 * (direction === "up" ? 1 : -1);
+    
+    drawingEngine.moveSelected(delta);
+    setDrawingsList(drawingEngine.getDrawings().map((d) => d.serialize()));
+  };
+
+  const handleDeleteDrawing = (id: string) => {
+    const drawingEngine = drawingEngineRef.current;
+    if (drawingEngine) {
+      drawingEngine.removeDrawing(id);
+    }
+  };
+
+  const handleClearDrawings = () => {
+    const drawingEngine = drawingEngineRef.current;
+    if (drawingEngine) {
+      drawingEngine.clearDrawings();
+    }
+  };
+
+  const handleUpdateStyle = (options: { color?: string; lineWidth?: number }) => {
+    const drawingEngine = drawingEngineRef.current;
+    if (!drawingEngine) return;
+
+    const selected = drawingEngine.getSelectedDrawing();
+    if (selected) {
+      if (options.color) selected.color = options.color;
+      if (options.lineWidth) selected.lineWidth = options.lineWidth;
+      drawingEngine.selectDrawing(selected.id);
+      setDrawingsList(drawingEngine.getDrawings().map((d) => d.serialize()));
+    }
+  };
+
+  const handleSaveDrawings = () => {
+    const drawingEngine = drawingEngineRef.current;
+    if (drawingEngine) {
+      const data = drawingEngine.serialize();
+      setSerializedData(data);
+      localStorage.setItem("tradeflow_drawings", data);
+    }
+  };
+
+  const handleLoadDrawings = () => {
+    const drawingEngine = drawingEngineRef.current;
+    if (drawingEngine) {
+      const data = localStorage.getItem("tradeflow_drawings") || serializedData;
+      if (data) {
+        drawingEngine.deserialize(data);
+      }
     }
   };
 
@@ -435,8 +599,55 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Drawing Toolbar */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between px-4 py-2.5 bg-brand-panel/40 border border-brand-border/60 rounded-t-lg border-b-0 gap-2">
+                <div className="flex items-center space-x-2">
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-brand-gold mr-1.5 font-mono">Drawing Tools:</span>
+                  <button
+                    onClick={() => { setActiveTool("cursor"); setPendingPoints([]); }}
+                    className={`p-1.5 rounded text-[10px] font-bold flex items-center space-x-1.5 transition ${
+                      activeTool === "cursor" ? "bg-brand-gold text-brand-bg font-bold shadow-md" : "bg-brand-bg hover:bg-brand-bg/80 text-white border border-brand-border"
+                    }`}
+                    title="Cursor Tool: Select, move, and edit drawings"
+                  >
+                    <MousePointer className="w-3.5 h-3.5" />
+                    <span>Cursor</span>
+                  </button>
+                  <button
+                    onClick={() => { setActiveTool("horizontal_line"); setPendingPoints([]); }}
+                    className={`p-1.5 rounded text-[10px] font-bold flex items-center space-x-1.5 transition ${
+                      activeTool === "horizontal_line" ? "bg-brand-gold text-brand-bg font-bold shadow-md" : "bg-brand-bg hover:bg-brand-bg/80 text-white border border-brand-border"
+                    }`}
+                    title="Place Horizontal Line (Click chart)"
+                  >
+                    <Minus className="w-3.5 h-3.5" />
+                    <span>Horizontal</span>
+                  </button>
+                  <button
+                    onClick={() => { setActiveTool("trend_line"); setPendingPoints([]); }}
+                    className={`p-1.5 rounded text-[10px] font-bold flex items-center space-x-1.5 transition ${
+                      activeTool === "trend_line" ? "bg-brand-gold text-brand-bg font-bold shadow-md" : "bg-brand-bg hover:bg-brand-bg/80 text-white border border-brand-border"
+                    }`}
+                    title="Draw Trend Line (Click first point, then second)"
+                  >
+                    <TrendingUp className="w-3.5 h-3.5" />
+                    <span>Trend Line</span>
+                  </button>
+                </div>
+
+                <div className="text-[10px] font-mono text-brand-text-muted leading-relaxed sm:text-right">
+                  {activeTool === "cursor" && "Cursor: Click a line on chart/sidebar to modify or delete."}
+                  {activeTool === "horizontal_line" && "Horizontal Line: Click on the chart to place."}
+                  {activeTool === "trend_line" && (
+                    pendingPoints.length === 0
+                      ? "Trend Line: Click on chart to place starting anchor."
+                      : "Trend Line: Click again on chart to place ending anchor."
+                  )}
+                </div>
+              </div>
+
               {/* Chart Component or Offline Notice */}
-              <div className="h-[400px] w-full relative bg-brand-bg rounded border border-brand-border/40 overflow-hidden">
+              <div className="h-[400px] w-full relative bg-brand-bg rounded-b-lg border border-brand-border/40 overflow-hidden">
                 {!isConnected ? (
                   <div className="absolute inset-0 flex flex-col items-center justify-center space-y-3 bg-brand-bg/95 z-10 text-center p-6">
                     <Power className="w-10 h-10 text-brand-slate animate-pulse" />
@@ -463,6 +674,8 @@ export default function App() {
                     timeframe={selectedTimeframe}
                     theme="dark"
                     indicators={chartIndicators}
+                    drawings={drawingsList}
+                    onChartClick={handleChartClick}
                   />
                 )}
               </div>
@@ -518,6 +731,146 @@ export default function App() {
           {/* Right Column: Engine Controls, Diagnostics, & Architectural Spec */}
           <div className="space-y-6">
             
+            {/* Drawing Objects Manager Hub */}
+            <section className="bg-brand-panel border border-brand-border rounded-lg p-5 shadow-sm">
+              <div className="flex items-center justify-between mb-3 border-b border-brand-border/40 pb-2.5">
+                <div className="flex items-center space-x-2 text-brand-gold">
+                  <TrendingUp className="w-5 h-5" />
+                  <h2 className="text-xs font-bold text-white uppercase tracking-wider">Drawing Engine Objects</h2>
+                </div>
+                <div className="flex items-center space-x-1.5">
+                  <button
+                    onClick={handleSaveDrawings}
+                    className="p-1.5 rounded bg-brand-bg hover:bg-brand-bg/80 text-white border border-brand-border text-[10px] font-bold flex items-center space-x-1 cursor-pointer"
+                    title="Serialize drawings to LocalStorage"
+                  >
+                    <Save className="w-3 h-3 text-brand-gold" />
+                    <span>Save</span>
+                  </button>
+                  <button
+                    onClick={handleLoadDrawings}
+                    className="p-1.5 rounded bg-brand-bg hover:bg-brand-bg/80 text-white border border-brand-border text-[10px] font-bold flex items-center space-x-1 cursor-pointer"
+                    title="Deserialize drawings from LocalStorage"
+                  >
+                    <FolderOpen className="w-3 h-3 text-blue-400" />
+                    <span>Load</span>
+                  </button>
+                  <button
+                    onClick={handleClearDrawings}
+                    className="p-1.5 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-[10px] font-bold flex items-center space-x-1 cursor-pointer"
+                    title="Clear all drawings"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>Clear</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Active Drawings List */}
+              <div className="space-y-2 mb-4">
+                {drawingsList.length === 0 ? (
+                  <p className="text-[10px] text-brand-text-muted italic py-3 text-center border border-dashed border-brand-border/60 rounded">
+                    No drawings created. Select a tool above the chart and click on the chart to draw.
+                  </p>
+                ) : (
+                  drawingsList.map((d) => {
+                    const isSelected = selectedDrawingId === d.id;
+                    return (
+                      <div
+                        key={d.id}
+                        onClick={() => {
+                          const engine = drawingEngineRef.current;
+                          if (engine) engine.selectDrawing(d.id);
+                        }}
+                        className={`p-2.5 rounded border flex items-center justify-between cursor-pointer transition ${
+                          isSelected
+                            ? "bg-brand-gold/10 border-brand-gold text-white"
+                            : "bg-brand-bg/40 border-brand-border hover:border-brand-slate text-brand-text-muted"
+                        }`}
+                      >
+                        <div className="flex items-center space-x-2">
+                          <span
+                            className="w-3 h-3 rounded-full border border-white/20 flex-shrink-0"
+                            style={{ backgroundColor: (d.properties?.color as string) || "#10b981" }}
+                          />
+                          <div>
+                            <span className="text-[11px] font-bold font-mono text-white block">
+                              {d.type === "horizontal-line" || d.type === "horizontal_line"
+                                ? `Horizontal (${d.properties?.price ?? d.points[0]?.price ?? 0})`
+                                : `Trend Line (${d.points.length} pts)`}
+                            </span>
+                            <span className="text-[9px] text-brand-text-muted font-mono">ID: {d.id}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center space-x-1">
+                          {isSelected && (
+                            <span className="text-[9px] bg-brand-gold text-brand-bg px-1.5 py-0.2 font-bold rounded uppercase mr-1">
+                              Selected
+                            </span>
+                          )}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteDrawing(d.id);
+                            }}
+                            className="p-1 hover:text-red-400 text-brand-slate transition"
+                            title="Delete drawing"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Selected Drawing Manipulator Controls */}
+              {selectedDrawingId && (
+                <div className="p-3 bg-brand-bg border border-brand-border rounded space-y-3">
+                  <div className="flex items-center justify-between border-b border-brand-border/40 pb-2">
+                    <span className="text-[10px] uppercase font-bold text-brand-gold font-mono">Manipulate Selected Drawing</span>
+                    <span className="text-[10px] text-brand-slate font-mono">{selectedDrawingId}</span>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center space-x-1.5">
+                      <span className="text-[10px] text-brand-text-muted">Nudge Price:</span>
+                      <button
+                        onClick={() => handleNudge("up")}
+                        className="p-1.5 bg-brand-panel hover:bg-brand-border text-white rounded border border-brand-border text-[10px] font-bold flex items-center space-x-1"
+                        title="Nudge Up"
+                      >
+                        <ArrowUp className="w-3 h-3 text-brand-green" />
+                        <span>Up</span>
+                      </button>
+                      <button
+                        onClick={() => handleNudge("down")}
+                        className="p-1.5 bg-brand-panel hover:bg-brand-border text-white rounded border border-brand-border text-[10px] font-bold flex items-center space-x-1"
+                        title="Nudge Down"
+                      >
+                        <ArrowDown className="w-3 h-3 text-brand-red" />
+                        <span>Down</span>
+                      </button>
+                    </div>
+
+                    <div className="flex items-center space-x-1.5">
+                      <span className="text-[10px] text-brand-text-muted">Color:</span>
+                      {["#ef4444", "#10b981", "#3b82f6", "#f59e0b", "#ec4899"].map((c) => (
+                        <button
+                          key={c}
+                          onClick={() => handleUpdateStyle({ color: c })}
+                          className="w-4 h-4 rounded-full border border-white/40 cursor-pointer transition hover:scale-110"
+                          style={{ backgroundColor: c }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </section>
+
             {/* Indicator Control Hub */}
             <section className="bg-brand-panel border border-brand-border rounded-lg p-5 shadow-sm">
               <div className="flex items-center space-x-2 mb-3 border-b border-brand-border/40 pb-2.5 text-brand-gold">
