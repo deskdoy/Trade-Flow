@@ -1,5 +1,7 @@
 import { WorkspaceEventListener, WorkspaceEventEmitter, WorkspaceEventType } from '../events/WorkspaceEvents.ts';
 import { WorkspaceManager } from '../manager/WorkspaceManager.ts';
+import { WorkspaceRegistry } from '../registry/WorkspaceRegistry.ts';
+import { SnapshotProvider } from '../snapshot/SnapshotProvider.ts';
 import { WorkspaceStorageProvider } from '../storage/WorkspaceStorage.ts';
 import { WorkspaceData, WorkspaceMetadata } from '../types/index.ts';
 import { WorkspaceValidator } from '../validation/WorkspaceValidator.ts';
@@ -17,12 +19,32 @@ export class WorkspaceEngine {
     return this.validator;
   }
 
+  public getRegistry(): WorkspaceRegistry {
+    return this.manager.getRegistry();
+  }
+
+  public registerSnapshotProvider(provider: SnapshotProvider): void {
+    this.manager.registerSnapshotProvider(provider);
+  }
+
+  public unregisterSnapshotProvider(providerId: string): void {
+    this.manager.unregisterSnapshotProvider(providerId);
+  }
+
+  public getSnapshotProvider(providerId: string): SnapshotProvider | undefined {
+    return this.manager.getSnapshotProvider(providerId);
+  }
+
   public save(workspace: WorkspaceData): WorkspaceMetadata {
     return this.manager.save(workspace);
   }
 
   public load(id: string): WorkspaceData {
     return this.manager.load(id);
+  }
+
+  public exists(id: string): boolean {
+    return this.manager.exists(id);
   }
 
   public delete(id: string): boolean {
@@ -37,8 +59,8 @@ export class WorkspaceEngine {
     return this.manager.duplicate(id, newName);
   }
 
-  public list(): WorkspaceMetadata[] {
-    return this.manager.list();
+  public list(filter?: { tag?: string; search?: string }): WorkspaceMetadata[] {
+    return this.manager.list(filter);
   }
 
   public export(id: string): string {

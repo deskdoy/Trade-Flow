@@ -51,6 +51,10 @@ export class LocalStorageProvider implements WorkspaceStorageProvider {
     this.memoryStore.delete(fullKey);
   }
 
+  public exists(key: string): boolean {
+    return this.getItem(key) !== null;
+  }
+
   public keys(): string[] {
     const matchedKeys: string[] = [];
     if (this.isBrowserLocalStorageAvailable) {
@@ -81,5 +85,13 @@ export class LocalStorageProvider implements WorkspaceStorageProvider {
       this.removeItem(key);
     }
     this.memoryStore.clear();
+  }
+
+  public export(key: string): string | null {
+    return this.getItem(key);
+  }
+
+  public import(key: string, data: string): void {
+    this.setItem(key, data);
   }
 }

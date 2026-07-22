@@ -1,8 +1,9 @@
 import { WorkspaceEventEmitter } from '../events/WorkspaceEvents.ts';
+import { WorkspaceRegistry } from '../registry/WorkspaceRegistry.ts';
+import { WorkspaceSerializer } from '../serialization/WorkspaceSerializer.ts';
+import { SnapshotProvider } from '../snapshot/SnapshotProvider.ts';
 import { LocalStorageProvider } from '../storage/LocalStorageProvider.ts';
 import { WorkspaceStorageProvider } from '../storage/WorkspaceStorage.ts';
-import { WorkspaceSerializer } from '../serialization/WorkspaceSerializer.ts';
-
 import { WorkspaceData, WorkspaceMetadata } from '../types/index.ts';
 import { WorkspaceValidator } from '../validation/WorkspaceValidator.ts';
 
@@ -11,6 +12,8 @@ export class WorkspaceManager {
   private serializer: WorkspaceSerializer;
   private validator: WorkspaceValidator;
   private events: WorkspaceEventEmitter;
+  private registry: WorkspaceRegistry = new WorkspaceRegistry();
+  private snapshotProviders: Map<string, SnapshotProvider> = new Map();
 
   constructor(
     events: WorkspaceEventEmitter,
@@ -21,6 +24,9 @@ export class WorkspaceManager {
     this.storage = storage ?? new LocalStorageProvider();
     this.validator = validator ?? new WorkspaceValidator();
     this.serializer = new WorkspaceSerializer(this.validator);
+
+    // Initial sync of lightweight registry metadata
+    this.registry.syncFromStorage(this.storage);
   }
 
   public getStorage(): WorkspaceStorageProvider {
@@ -29,6 +35,22 @@ export class WorkspaceManager {
 
   public getValidator(): WorkspaceValidator {
     return this.validator;
+  }
+
+  public getRegistry(): WorkspaceRegistry {
+    return this.registry;
+  }
+
+  public registerSnapshotProvider(provider: SnapshotProvider): void {
+    this.snapshotProviders.set(provider.id, provider);
+  }
+
+  public unregisterSnapshotProvider(providerId: string): void {
+    this.snapshotProviders.delete(providerId);
+  }
+
+  public getSnapshotProvider(providerId: string): SnapshotProvider | undefined {
+    return this.snapshotProviders.get(providerId);
   }
 
   /**
@@ -42,7 +64,7 @@ export class WorkspaceManager {
     if (existingRaw) {
       try {
         const parsed = JSON.parse(existingRaw);
-        existingCreatedAt = parsed.createdAt;
+        existingCreatedAt = parsed.createdAt || parsed.metadata?.createdAt;
       } catch {
         // Ignore JSON parse errors on existing record
       }
@@ -55,15 +77,20 @@ export class WorkspaceManager {
 
     this.storage.setItem(key, jsonStr);
 
-    const meta: WorkspaceMetadata = {
+    const meta: WorkspaceMetadata = envelope.metadata || {
       id: workspace.id,
       name: workspace.name,
-      version: envelope.version,
+      description: workspace.description,
+      tags: workspace.tags,
+      platformVersion: '1.0.0',
+      workspaceVersion: envelope.version,
       createdAt: envelope.createdAt,
       updatedAt: envelope.updatedAt,
     };
 
-    this.events.emit('workspace.saved', { workspace });
+    this.registry.register(meta);
+
+    this.events.emit('workspace.saved', { workspace: envelope.workspace });
     return meta;
   }
 
@@ -93,13 +120,21 @@ export class WorkspaceManager {
   }
 
   /**
+   * Checks if workspace exists by ID
+   */
+  public exists(id: string): boolean {
+    return this.registry.has(id) || this.storage.exists(`ws_${id}`);
+  }
+
+  /**
    * Deletes a workspace by ID
    */
   public delete(id: string): boolean {
     const key = `ws_${id}`;
-    const exists = this.storage.getItem(key) !== null;
+    const exists = this.storage.exists(key);
     if (exists) {
       this.storage.removeItem(key);
+      this.registry.unregister(id);
       this.events.emit('workspace.deleted', { id });
       return true;
     }
@@ -139,32 +174,10 @@ export class WorkspaceManager {
   }
 
   /**
-   * Lists metadata for all stored workspaces
+   * Lists metadata for all stored workspaces via lightweight WorkspaceRegistry
    */
-  public list(): WorkspaceMetadata[] {
-    const keys = this.storage.keys();
-    const result: WorkspaceMetadata[] = [];
-
-    for (const k of keys) {
-      if (!k.startsWith('ws_')) continue;
-      const raw = this.storage.getItem(k);
-      if (!raw) continue;
-
-      try {
-        const envelope = this.serializer.deserialize(raw);
-        result.push({
-          id: envelope.workspace.id,
-          name: envelope.workspace.name,
-          version: envelope.version,
-          createdAt: envelope.createdAt,
-          updatedAt: envelope.updatedAt,
-        });
-      } catch (err) {
-        console.warn(`[WorkspaceManager] Skipping invalid workspace record "${k}":`, err);
-      }
-    }
-
-    return result.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  public list(filter?: { tag?: string; search?: string }): WorkspaceMetadata[] {
+    return this.registry.list(filter);
   }
 
   /**
@@ -172,7 +185,7 @@ export class WorkspaceManager {
    */
   public export(id: string): string {
     const key = `ws_${id}`;
-    const raw = this.storage.getItem(key);
+    const raw = this.storage.export ? this.storage.export(key) : this.storage.getItem(key);
     if (!raw) {
       throw new Error(`[WorkspaceManager] Export failed: Workspace "${id}" not found.`);
     }

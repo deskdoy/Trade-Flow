@@ -1,5 +1,10 @@
 export type ThemeMode = 'dark' | 'light';
 
+export interface ViewportRange {
+  from: number;
+  to: number;
+}
+
 export interface AppWorkspaceState {
   theme: ThemeMode;
   sidebarOpen: boolean;
@@ -10,11 +15,10 @@ export interface AppWorkspaceState {
 export interface ChartWorkspaceState {
   symbol: string;
   timeframe: string;
-  zoomLevel?: number;
-  visibleRange?: {
-    from: number;
-    to: number;
-  };
+  visibleLogicalRange?: ViewportRange;
+  visibleTimeRange?: ViewportRange;
+  visibleRange?: ViewportRange; // For V1 backward compatibility
+  zoomLevel?: number; // For V1 backward compatibility
 }
 
 export interface IndicatorWorkspaceState {
@@ -30,7 +34,6 @@ export interface IndicatorWorkspaceState {
 export interface DrawingWorkspaceState {
   id: string;
   type: string;
-  selected?: boolean;
   visible: boolean;
   points: Array<{ time: string; price: number }>;
   properties: Record<string, unknown>;
@@ -44,6 +47,8 @@ export interface MarketDataWorkspaceState {
 export interface WorkspaceData {
   id: string;
   name: string;
+  description?: string;
+  tags?: string[];
   app: AppWorkspaceState;
   chart: ChartWorkspaceState;
   indicators: IndicatorWorkspaceState[];
@@ -51,10 +56,22 @@ export interface WorkspaceData {
   marketData: MarketDataWorkspaceState;
 }
 
+export interface WorkspaceMetadata {
+  id: string;
+  name: string;
+  description?: string;
+  tags?: string[];
+  platformVersion: string;
+  workspaceVersion: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface WorkspaceEnvelope {
   version: number;
   createdAt: string;
   updatedAt: string;
+  metadata?: WorkspaceMetadata;
   workspace: WorkspaceData;
 }
 
@@ -66,12 +83,4 @@ export interface ValidationError {
 export interface ValidationResult {
   valid: boolean;
   errors: ValidationError[];
-}
-
-export interface WorkspaceMetadata {
-  id: string;
-  name: string;
-  version: number;
-  createdAt: string;
-  updatedAt: string;
 }
