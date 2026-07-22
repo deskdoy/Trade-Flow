@@ -48,6 +48,9 @@
       ],
       "@tradeflow/paper-trading": [
         "./packages/paper-trading/src/index.ts"
+      ],
+      "@tradeflow/risk-engine": [
+        "./packages/risk-engine/src/index.ts"
       ]
     },
     "allowImportingTsExtensions": true,
