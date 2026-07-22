@@ -45,6 +45,9 @@
       ],
       "@tradeflow/trading-domain": [
         "./packages/trading-domain/src/index.ts"
+      ],
+      "@tradeflow/paper-trading": [
+        "./packages/paper-trading/src/index.ts"
       ]
     },
     "allowImportingTsExtensions": true,
