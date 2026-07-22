@@ -33,6 +33,15 @@
       ],
       "@tradeflow/drawing-engine": [
         "./packages/drawing-engine/src/index.ts"
+      ],
+      "@tradeflow/interaction-engine": [
+        "./packages/interaction-engine/src/index.ts"
+      ],
+      "@tradeflow/core": [
+        "./packages/core/src/index.ts"
+      ],
+      "@tradeflow/workspace-engine": [
+        "./packages/workspace-engine/src/index.ts"
       ]
     },
     "allowImportingTsExtensions": true,
