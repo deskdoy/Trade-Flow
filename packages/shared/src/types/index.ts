@@ -65,3 +65,15 @@ export interface Candle {
   close: number;
   volume?: number;
 }
+
+export interface Point2D {
+  x: number;
+  y: number;
+}
+
+export interface PricePoint {
+  time: string;
+  price: number;
+}
+
+export type ThemeMode = "dark" | "light";
