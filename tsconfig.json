@@ -42,6 +42,9 @@
       ],
       "@tradeflow/workspace-engine": [
         "./packages/workspace-engine/src/index.ts"
+      ],
+      "@tradeflow/trading-domain": [
+        "./packages/trading-domain/src/index.ts"
       ]
     },
     "allowImportingTsExtensions": true,

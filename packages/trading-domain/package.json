@@ -1,0 +1,17 @@
+{
+  "name": "@tradeflow/trading-domain",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "test": "tsx src/__tests__/TradingDomain.test.ts"
+  },
+  "dependencies": {
+    "@tradeflow/core": "workspace:*",
+    "@tradeflow/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}
