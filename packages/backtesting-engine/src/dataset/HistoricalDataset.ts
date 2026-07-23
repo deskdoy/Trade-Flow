@@ -74,7 +74,7 @@ export class HistoricalDataset {
   }
 
   /**
-   * Returns candle at specified index without array copying
+   * Returns candle at specified index directly without reallocation
    */
   public get(index: number): Candle | undefined {
     if (index < 0 || index >= this.candles.length) {
@@ -84,7 +84,7 @@ export class HistoricalDataset {
   }
 
   /**
-   * Returns range slice of candles [startIdx, endIdx) efficiently
+   * Returns shallow array view slice of candles [startIdx, endIdx) while preserving shared candle object references
    */
   public range(startIdx: number, endIdx: number): ReadonlyArray<Candle> {
     const start = Math.max(0, startIdx);

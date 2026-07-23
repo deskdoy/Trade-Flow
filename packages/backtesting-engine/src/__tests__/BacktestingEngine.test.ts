@@ -219,6 +219,124 @@ async function runTests() {
     console.log(`✓ 100,000 candles processed successfully in ${elapsedMs}ms`);
   }
 
+  // Test 6: Sprint 14.1 PlaybackMode Getters & Setters
+  {
+    console.log('Test 6: PlaybackMode getters & setters');
+    const backtestingEngine = new BacktestingEngine();
+    assert(backtestingEngine.getPlaybackMode() === 'RUN', 'Default PlaybackMode should be RUN');
+    backtestingEngine.setPlaybackMode('REPLAY');
+    assert(backtestingEngine.getPlaybackMode() === 'REPLAY', 'PlaybackMode set to REPLAY');
+    console.log('✓ PlaybackMode tests passed');
+  }
+
+  // Test 7: Sprint 14.1 Snapshot Seed Persistence & Backward Compatibility
+  {
+    console.log('Test 7: Snapshot seed persistence & backward compatibility');
+    const customSeed = 987654;
+    const engine = new BacktestingEngine({
+      config: { seed: customSeed, symbol: 'SOL/USD' },
+    });
+    assert(engine.getSeed() === customSeed, 'Seed matches initial custom seed');
+
+    const snapshot = engine.getSnapshot();
+    assert(snapshot.seed === customSeed, 'Snapshot seed matches custom seed');
+    assert(snapshot.version === 1, 'Snapshot version is 1');
+    assert(snapshot.schemaVersion === 1, 'Snapshot schemaVersion is 1');
+    assert(snapshot.engineVersion === '0.1.0', 'Snapshot engineVersion is 0.1.0');
+    assert(typeof snapshot.createdAt === 'string', 'createdAt is ISO string');
+    assert(typeof snapshot.updatedAt === 'string', 'updatedAt is ISO string');
+
+    // Test restoring legacy snapshot missing seed and version metadata
+    const legacySnapshot: any = {
+      state: 'PAUSED',
+      currentIndex: 2,
+      currentTime: '2025-01-01T02:00:00Z',
+      speed: '2x',
+      candlesCount: 5,
+      timestamp: '2025-01-01T02:00:00Z',
+    };
+    engine.restoreSnapshot(legacySnapshot);
+    assert(engine.getState() === 'PAUSED', 'Restored state is PAUSED');
+    assert(engine.getPlayback().getSpeed() === '2x', 'Restored speed is 2x');
+    assert(engine.getSeed() === customSeed, 'Seed retained when restoring legacy snapshot');
+
+    // Test restoring snapshot with new seed
+    const newSnapshot = { ...snapshot, seed: 112233 };
+    engine.restoreSnapshot(newSnapshot);
+    assert(engine.getSeed() === 112233, 'Restored seed is 112233');
+
+    console.log('✓ Snapshot seed persistence & backward compatibility passed');
+  }
+
+  // Test 8: Sprint 14.1 Engine Lifecycle Contract
+  {
+    console.log('Test 8: Engine Lifecycle contract');
+    const engine = new BacktestingEngine();
+    engine.initialize();
+    const health = engine.getHealth();
+    assert(health.healthy === true, 'Engine health is true');
+    assert(health.version === '0.1.0', 'Health version is 0.1.0');
+    assert(engine.getVersion() === '0.1.0', 'getVersion returns 0.1.0');
+
+    engine.reset();
+    assert(engine.getState() === 'IDLE', 'State reset to IDLE');
+
+    engine.destroy();
+    console.log('✓ Lifecycle contract tests passed');
+  }
+
+  // Test 9: Sprint 14.1 Event Standardization & Aliases
+  {
+    console.log('Test 9: Event standardization & aliases');
+    const engine = new BacktestingEngine();
+    let failedFired = false;
+    let errorFired = false;
+
+    engine.on('backtest.failed', (data) => {
+      failedFired = true;
+      assert(data.error.includes('empty'), 'backtest.failed received error message');
+    });
+
+    engine.on('backtest.error', (data) => {
+      errorFired = true;
+      assert(data.error.includes('empty'), 'backtest.error received error message');
+    });
+
+    try {
+      engine.run(); // Will fail validation because dataset is empty
+    } catch (e) {
+      // Expected validation error
+    }
+
+    assert(failedFired === true, 'backtest.failed event emitted');
+    assert(errorFired === true, 'backtest.error event emitted');
+
+    console.log('✓ Event standardization & aliases passed');
+  }
+
+  // Test 10: Sprint 14.1 Simulation Metadata in Report
+  {
+    console.log('Test 10: Simulation metadata in BacktestReport');
+    const candles = generateSampleCandles(10);
+    const engine = new BacktestingEngine({
+      config: { seed: 555666 },
+    });
+    engine.loadDataset(candles);
+    engine.setPlaybackMode('RUN');
+    engine.run();
+
+    const report = engine.generateReport();
+    const metrics = report.getMetrics();
+
+    assert(metrics.seed === 555666, 'Metrics seed is 555666');
+    assert(metrics.playbackMode === 'RUN', 'Metrics playbackMode is RUN');
+    assert(metrics.processedCandles === 10, 'Metrics processedCandles is 10');
+    assert(typeof metrics.simulationDuration === 'number', 'simulationDuration is a number');
+    assert(typeof metrics.averageCandlesPerSecond === 'number', 'averageCandlesPerSecond is a number');
+
+    console.log('✓ Simulation metadata in BacktestReport passed');
+  }
+
   console.log('\nAll Backtesting Engine tests passed successfully!');
 }
 

@@ -11,12 +11,15 @@ export type BacktestState =
 
 export type PlaybackSpeed = '1x' | '2x' | '4x' | '10x' | 'UNLIMITED';
 
+export type PlaybackMode = 'RUN' | 'REPLAY';
+
 export interface BacktestConfig {
   symbol: string;
   timeframe: string;
   initialBalance?: number;
   playbackSpeed?: PlaybackSpeed;
   maxCandleHistory?: number;
+  seed?: number;
 }
 
 export interface BacktestReportMetrics {
@@ -39,15 +42,28 @@ export interface BacktestReportMetrics {
   initialBalance: number;
   finalBalance: number;
   finalEquity: number;
+
+  // Sprint 14.1 simulation metadata additions
+  simulationDuration: number;
+  processedCandles: number;
+  averageCandlesPerSecond: number;
+  playbackMode: PlaybackMode;
+  seed: number;
 }
 
 export interface BacktestSnapshotData {
+  version?: number;
+  engineVersion?: string;
+  schemaVersion?: number;
+  seed: number;
   state: BacktestState;
   currentIndex: number;
   currentTime: string;
   speed: PlaybackSpeed;
   candlesCount: number;
   timestamp: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export type { ValidationResult };

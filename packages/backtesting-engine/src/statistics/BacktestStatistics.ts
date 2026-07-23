@@ -1,5 +1,5 @@
 import { PortfolioEngine } from '@tradeflow/portfolio-engine';
-import { BacktestReportMetrics } from '../types/index.ts';
+import { BacktestReportMetrics, PlaybackMode } from '../types/index.ts';
 
 export class BacktestStatistics {
   public static compute(
@@ -7,12 +7,20 @@ export class BacktestStatistics {
     startDate: string,
     endDate: string,
     totalCandles: number,
-    initialBalance: number
+    initialBalance: number,
+    simulationDurationMs: number = 0,
+    playbackMode: PlaybackMode = 'RUN',
+    seed: number = 123456
   ): BacktestReportMetrics {
     const holdings = portfolioEngine.getHoldings();
     const equityData = portfolioEngine.getEquity();
     const perf = portfolioEngine.getPerformance();
     const stats = portfolioEngine.getStatistics();
+
+    const processedCandles = totalCandles;
+    const durationSec = simulationDurationMs / 1000;
+    const averageCandlesPerSecond =
+      durationSec > 0 ? Math.round(processedCandles / durationSec) : processedCandles;
 
     return {
       startDate,
@@ -34,6 +42,12 @@ export class BacktestStatistics {
       initialBalance,
       finalBalance: holdings.cashBalance ?? initialBalance,
       finalEquity: holdings.totalEquity ?? initialBalance,
+
+      simulationDuration: simulationDurationMs,
+      processedCandles,
+      averageCandlesPerSecond,
+      playbackMode,
+      seed,
     };
   }
 }

@@ -21,6 +21,7 @@ import {
   BacktestReportMetrics,
   BacktestSnapshotData,
   BacktestState,
+  PlaybackMode,
   PlaybackSpeed,
 } from '../types/index.ts';
 import { BacktestValidator } from '../validation/BacktestValidator.ts';
@@ -57,13 +58,23 @@ export class BacktestingEngine
   private startTime: number = Date.now();
   private targetId: string = 'backtest-paper-target';
 
+  // Sprint 14.1 additions
+  private playbackMode: PlaybackMode = 'RUN';
+  private seed: number;
+  private createdAt: string;
+  private lastRunDurationMs: number = 0;
+
   constructor(options: BacktestingEngineOptions = {}) {
+    this.seed = options.config?.seed ?? Math.floor(Math.random() * 1000000);
+    this.createdAt = new Date().toISOString();
+
     this.config = {
       symbol: options.config?.symbol ?? 'BTC/USD',
       timeframe: options.config?.timeframe ?? '1h',
       initialBalance: options.config?.initialBalance ?? 100000,
       playbackSpeed: options.config?.playbackSpeed ?? 'UNLIMITED',
       maxCandleHistory: options.config?.maxCandleHistory ?? 1000,
+      seed: this.seed,
     };
 
     // Initialize clock and playback controller
@@ -96,6 +107,20 @@ export class BacktestingEngine
 
     // Setup BacktestRunner
     this.recreateRunner();
+  }
+
+  // --- PlaybackMode Abstraction ---
+
+  public getPlaybackMode(): PlaybackMode {
+    return this.playbackMode;
+  }
+
+  public setPlaybackMode(mode: PlaybackMode): void {
+    this.playbackMode = mode;
+  }
+
+  public getSeed(): number {
+    return this.seed;
   }
 
   /**
@@ -178,11 +203,12 @@ export class BacktestingEngine
 
   public reset(): void {
     this.clock.reset();
-    this.playback.stop();
+    this.playback.setState('IDLE');
     this.portfolioEngine.reset(this.config.initialBalance);
     this.paperTrading.reset();
     this.oms.reset();
     this.strategyEngine.reset();
+    this.lastRunDurationMs = 0;
     this.recreateRunner();
   }
 
@@ -194,22 +220,36 @@ export class BacktestingEngine
   // --- Snapshot Provider Implementation ---
 
   public getSnapshot(): BacktestSnapshotData {
+    const now = new Date().toISOString();
     return {
+      version: 1,
+      engineVersion: this.getVersion(),
+      schemaVersion: 1,
+      seed: this.seed,
       state: this.playback.getState(),
       currentIndex: this.clock.currentIndex(),
       currentTime: this.clock.currentTime(),
       speed: this.playback.getSpeed(),
       candlesCount: this.dataset.length(),
-      timestamp: new Date().toISOString(),
+      timestamp: now,
+      createdAt: this.createdAt,
+      updatedAt: now,
     };
   }
 
   public restoreSnapshot(snapshot: BacktestSnapshotData): void {
-    this.playback.setSpeed(snapshot.speed);
-    if (snapshot.currentIndex >= 0) {
+    if (snapshot.speed) {
+      this.playback.setSpeed(snapshot.speed);
+    }
+    if (snapshot.currentIndex !== undefined && snapshot.currentIndex >= 0) {
       this.clock.seek(snapshot.currentIndex);
     }
-    this.playback.setState(snapshot.state);
+    if (snapshot.state) {
+      this.playback.setState(snapshot.state);
+    }
+    if (snapshot.seed !== undefined) {
+      this.seed = snapshot.seed;
+    }
   }
 
   // --- Public Backtesting API ---
@@ -235,9 +275,11 @@ export class BacktestingEngine
    * Runs backtest from current position to completion
    */
   public run(): void {
+    const runStartTime = Date.now();
     const valResult = this.validate();
     if (!valResult.valid) {
       const errStr = valResult.errors.map((e) => e.message).join('; ');
+      this.emitter.emit('backtest.failed', { error: errStr });
       this.emitter.emit('backtest.error', { error: errStr });
       throw new Error(`Backtest run validation failed: ${errStr}`);
     }
@@ -267,6 +309,8 @@ export class BacktestingEngine
         break;
       }
     }
+
+    this.lastRunDurationMs = Date.now() - runStartTime;
 
     if (this.playback.getState() === 'RUNNING') {
       this.playback.setState('COMPLETED');
@@ -368,7 +412,10 @@ export class BacktestingEngine
       startDate,
       endDate,
       totalCandles,
-      this.config.initialBalance ?? 100000
+      this.config.initialBalance ?? 100000,
+      this.lastRunDurationMs,
+      this.playbackMode,
+      this.seed
     );
 
     return new BacktestReport(metrics);

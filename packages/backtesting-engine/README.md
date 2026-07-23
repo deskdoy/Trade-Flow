@@ -17,12 +17,19 @@ The Backtesting Engine coordinates TradeFlow's modular DAG engine pipeline over 
 
 ## Key Components
 
-- **BacktestingEngine**: Main orchestrator implementing `EngineLifecycle`, `EngineHealth`, and `SnapshotProvider`.
-- **SimulationClock**: Deterministic simulation clock (`start`, `pause`, `resume`, `stop`, `seek`, `next`, `previous`, `currentTime`). Never uses real `Date.now()` for simulation time.
+- **BacktestingEngine**: Main orchestrator implementing `EngineLifecycle`, `EngineHealth`, and `SnapshotProvider`. Supports `PlaybackMode` (`RUN` | `REPLAY`).
+- **SimulationClock**: Deterministic simulation clock (`start`, `pause`, `resume`, `stop`, `seek`, `next`, `previous`, `currentTime`). Time is fully simulated.
 - **PlaybackController**: Controls playback state and speeds (`1x`, `2x`, `4x`, `10x`, `UNLIMITED`).
-- **HistoricalDataset**: In-memory candle dataset supporting fast range slices without copying.
-- **BacktestReport**: Immutable report object containing Sharpe ratio, Sortino ratio, max drawdown, win rate, expectancy, and profit factor.
-- **BacktestEvents**: Strongly typed event bus publishing `backtest.started`, `backtest.paused`, `backtest.step`, `backtest.completed`, etc.
+- **HistoricalDataset**: In-memory candle dataset supporting lightweight shallow array views while preserving shared candle object references.
+- **BacktestReport**: Immutable report object containing Sharpe ratio, Sortino ratio, max drawdown, win rate, expectancy, simulation duration, and profit factor.
+- **BacktestEvents**: Strongly typed event bus publishing `backtest.started`, `backtest.paused`, `backtest.step`, `backtest.completed`, `backtest.failed`, etc.
+
+## Performance & Memory Architecture
+
+- **Shallow Array Allocations**: Slicing creates shallow array views without duplicating underlying candle objects.
+- **Shared Object References**: Candle data structures are reused as immutable references across strategy evaluation cycles.
+- **Bounded Allocations**: Historical context windows are constrained by `maxCandleHistory` to guarantee O(1) per-step execution memory footprint.
+- **Deterministic Execution**: Time advances strictly via `SimulationClock` index ticks, eliminating non-deterministic temporal side effects.
 
 ## Usage Example
 
@@ -38,6 +45,7 @@ const backtester = new BacktestingEngine({
     symbol: 'BTC/USD',
     timeframe: '1h',
     initialBalance: 100000,
+    seed: 123456,
   },
   strategyEngine,
 });
@@ -48,4 +56,5 @@ backtester.run();
 const report = backtester.generateReport();
 console.log('Win Rate:', report.getMetrics().winRate);
 console.log('Net Profit:', report.getMetrics().netProfit);
+console.log('Simulation Duration:', report.getMetrics().simulationDuration, 'ms');
 ```

@@ -9,6 +9,7 @@ export interface BacktestEventPayloadMap {
   'backtest.step': { index: number; candle: Candle; totalCandles: number };
   'backtest.completed': { report: BacktestReportMetrics };
   'backtest.finished': { state: BacktestState; index: number };
+  'backtest.failed': { error: string };
   'backtest.speed.changed': { speed: PlaybackSpeed };
   'backtest.error': { error: string };
 }

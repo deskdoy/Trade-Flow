@@ -78,7 +78,7 @@ export class BacktestRunner {
     // 2. Update Portfolio Engine mark price with candle close price
     this.portfolioEngine.updateMarkPrice(this.config.symbol, candle.close);
 
-    // 3. Prepare historical candles slice without unnecessary deep copying
+    // 3. Prepare historical candles slice container while preserving shared candle object references
     const maxHistory = this.config.maxCandleHistory ?? 1000;
     const startIdx = Math.max(0, currentIndex - maxHistory + 1);
     const candlesHistory = this.dataset.range(startIdx, currentIndex + 1);

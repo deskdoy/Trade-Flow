@@ -14,6 +14,7 @@ export type {
   BacktestConfig,
   BacktestState,
   PlaybackSpeed,
+  PlaybackMode,
   BacktestReportMetrics,
   BacktestSnapshotData,
   ValidationResult,
