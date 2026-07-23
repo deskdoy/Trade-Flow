@@ -1,6 +1,7 @@
 import { OrderData, OrderSide, OrderStatus, OrderType, PositionSide } from '@tradeflow/trading-domain';
 import { RiskEngine } from '@tradeflow/risk-engine';
 import { PaperOrderParams } from '@tradeflow/paper-trading';
+import { ExecutionEngine, ExecutionStatus } from '@tradeflow/execution-engine';
 import { OrderEventEmitter, OrderEventListener, OrderEventType } from '../events/OrderEvents.ts';
 import { OrderLifecycle } from '../lifecycle/OrderLifecycle.ts';
 import { OrderStateMachine } from '../lifecycle/OrderStateMachine.ts';
@@ -23,13 +24,19 @@ export class OrderManagementEngine {
   private orderManager: OrderManager = new OrderManager();
   private orderRouter: OrderRouter;
   private riskEngine: RiskEngine;
+  private executionEngine: ExecutionEngine;
   private lifecycle: OrderLifecycle = new OrderLifecycle();
   private validator: OrderRequestValidator = new OrderRequestValidator();
   private emitter: OrderEventEmitter = new OrderEventEmitter();
 
-  constructor(riskEngine?: RiskEngine, orderRouter?: OrderRouter) {
+  constructor(
+    riskEngine?: RiskEngine,
+    orderRouter?: OrderRouter,
+    executionEngine?: ExecutionEngine
+  ) {
     this.riskEngine = riskEngine || new RiskEngine();
     this.orderRouter = orderRouter || new OrderRouter();
+    this.executionEngine = executionEngine || new ExecutionEngine(this.orderRouter as any);
   }
 
   public getRiskEngine(): RiskEngine {
@@ -40,12 +47,17 @@ export class OrderManagementEngine {
     return this.orderRouter;
   }
 
+  public getExecutionEngine(): ExecutionEngine {
+    return this.executionEngine;
+  }
+
   public getOrderManager(): OrderManager {
     return this.orderManager;
   }
 
   public registerExecutionTarget(target: ExecutionTarget): void {
     this.orderRouter.registerTarget(target);
+    this.executionEngine.registerTarget(target as any);
   }
 
   /**
@@ -162,21 +174,22 @@ export class OrderManagementEngine {
     this.orderManager.saveOrder(record);
     this.emitter.emit('oms.order.routed', { orderRecord: record, targetId: target.id });
 
-    // 8. Execute on Target
+    // 8. Execute on Target via Execution Engine
     try {
-      const execResult = target.executeOrder(request) as OrderData;
-      record.executionResult = execResult;
+      const execResult = this.executionEngine.executeSync(request, { targetId: target.id });
+      const orderData = execResult.orderData || (target.executeOrder(request) as OrderData);
+      record.executionResult = orderData;
 
       let finalState = OMSOrderState.FILLED;
-      if (execResult.status === OrderStatus.REJECTED) {
+      if (orderData.status === OrderStatus.REJECTED) {
         finalState = OMSOrderState.REJECTED;
-      } else if (execResult.status === OrderStatus.CANCELLED) {
+      } else if (orderData.status === OrderStatus.CANCELLED) {
         finalState = OMSOrderState.CANCELLED;
-      } else if (execResult.status === OrderStatus.PARTIALLY_FILLED) {
+      } else if (orderData.status === OrderStatus.PARTIALLY_FILLED) {
         finalState = OMSOrderState.PARTIALLY_FILLED;
-      } else if (execResult.status === OrderStatus.EXPIRED) {
+      } else if (orderData.status === OrderStatus.EXPIRED) {
         finalState = OMSOrderState.EXPIRED;
-      } else if (execResult.status === OrderStatus.PENDING) {
+      } else if (orderData.status === OrderStatus.PENDING) {
         // Limits or stops resting in order book are routed/pending
         finalState = OMSOrderState.ROUTED;
       }
@@ -187,7 +200,7 @@ export class OrderManagementEngine {
       this.orderManager.saveOrder(record);
 
       if (finalState === OMSOrderState.FILLED || finalState === OMSOrderState.PARTIALLY_FILLED || finalState === OMSOrderState.ROUTED) {
-        this.emitter.emit('oms.order.filled', { orderRecord: record, executionResult: execResult });
+        this.emitter.emit('oms.order.filled', { orderRecord: record, executionResult: orderData });
       }
 
       return {
@@ -195,7 +208,7 @@ export class OrderManagementEngine {
         orderId: record.id,
         clientOrderId: record.clientOrderId,
         state: record.state,
-        executionResult: execResult,
+        executionResult: orderData,
         orderRecord: record,
       };
     } catch (error) {

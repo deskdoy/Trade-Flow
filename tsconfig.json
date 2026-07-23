@@ -54,6 +54,9 @@
       ],
       "@tradeflow/order-management": [
         "./packages/order-management/src/index.ts"
+      ],
+      "@tradeflow/execution-engine": [
+        "./packages/execution-engine/src/index.ts"
       ]
     },
     "allowImportingTsExtensions": true,

@@ -1,17 +1,15 @@
 {
-  "name": "@tradeflow/order-management",
+  "name": "@tradeflow/execution-engine",
   "version": "0.1.0",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
-    "test": "tsx src/__tests__/OrderManagement.test.ts"
+    "test": "tsx src/__tests__/ExecutionEngine.test.ts"
   },
   "dependencies": {
     "@tradeflow/core": "workspace:*",
-    "@tradeflow/execution-engine": "workspace:*",
     "@tradeflow/paper-trading": "workspace:*",
-    "@tradeflow/risk-engine": "workspace:*",
     "@tradeflow/shared": "workspace:*",
     "@tradeflow/trading-domain": "workspace:*"
   },
