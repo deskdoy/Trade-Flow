@@ -60,6 +60,9 @@
       ],
       "@tradeflow/portfolio-engine": [
         "./packages/portfolio-engine/src/index.ts"
+      ],
+      "@tradeflow/strategy-engine": [
+        "./packages/strategy-engine/src/index.ts"
       ]
     },
     "allowImportingTsExtensions": true,
