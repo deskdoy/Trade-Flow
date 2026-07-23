@@ -1,4 +1,4 @@
-import { PositionData, PositionSide } from '@tradeflow/trading-domain';
+import { OrderType, PositionData, PositionSide } from '@tradeflow/trading-domain';
 import { PaperAccountState, PaperOrderParams } from '@tradeflow/paper-trading';
 import { ExposureCalculator } from '../exposure/ExposureCalculator.ts';
 import { MarginCalculator } from '../margin/MarginCalculator.ts';
@@ -25,8 +25,15 @@ export class OrderRiskValidator {
       reasons.push('Order quantity must be greater than zero.');
     }
 
-    const orderPrice = orderParams.price || orderParams.stopPrice || 0;
+    let orderPrice = orderParams.price || orderParams.stopPrice || 0;
     if (orderPrice <= 0) {
+      const pos = openPositions.find((p) => p.symbol === orderParams.symbol && p.isOpen);
+      if (pos) {
+        orderPrice = pos.markPrice || pos.entryPrice || 0;
+      }
+    }
+
+    if (orderPrice <= 0 && orderParams.type !== OrderType.MARKET) {
       reasons.push('Order price or stop price must be greater than zero for risk validation.');
     }
 

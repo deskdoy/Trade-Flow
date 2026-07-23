@@ -51,6 +51,9 @@
       ],
       "@tradeflow/risk-engine": [
         "./packages/risk-engine/src/index.ts"
+      ],
+      "@tradeflow/order-management": [
+        "./packages/order-management/src/index.ts"
       ]
     },
     "allowImportingTsExtensions": true,

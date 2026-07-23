@@ -1,0 +1,20 @@
+{
+  "name": "@tradeflow/order-management",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "test": "tsx src/__tests__/OrderManagement.test.ts"
+  },
+  "dependencies": {
+    "@tradeflow/core": "workspace:*",
+    "@tradeflow/paper-trading": "workspace:*",
+    "@tradeflow/risk-engine": "workspace:*",
+    "@tradeflow/shared": "workspace:*",
+    "@tradeflow/trading-domain": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}
