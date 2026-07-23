@@ -1,0 +1,25 @@
+{
+  "name": "@tradeflow/backtesting-engine",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "test": "tsx src/__tests__/BacktestingEngine.test.ts"
+  },
+  "dependencies": {
+    "@tradeflow/core": "workspace:*",
+    "@tradeflow/execution-engine": "workspace:*",
+    "@tradeflow/market-data": "workspace:*",
+    "@tradeflow/order-management": "workspace:*",
+    "@tradeflow/paper-trading": "workspace:*",
+    "@tradeflow/portfolio-engine": "workspace:*",
+    "@tradeflow/risk-engine": "workspace:*",
+    "@tradeflow/shared": "workspace:*",
+    "@tradeflow/strategy-engine": "workspace:*",
+    "@tradeflow/trading-domain": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}
