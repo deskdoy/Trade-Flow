@@ -1,3 +1,4 @@
+import { OptimizationExporter } from '../exporters/OptimizationExporter.ts';
 import { OptimizationResultItem, RankingMetric } from '../types/index.ts';
 
 export class OptimizationReport {
@@ -29,6 +30,10 @@ export class OptimizationReport {
 
   public getDurationMs(): number {
     return this.durationMs;
+  }
+
+  public export(exporter: OptimizationExporter): string {
+    return exporter.export(this);
   }
 
   public toJSON() {

@@ -1,5 +1,5 @@
 import { Candle } from '@tradeflow/shared';
-import { BacktestReportMetrics } from '@tradeflow/backtesting-engine';
+import { BacktestReportMetrics, BacktestSnapshotData } from '@tradeflow/backtesting-engine';
 
 export type OptimizationMode = 'GRID_SEARCH' | 'RANDOM_SEARCH';
 
@@ -50,16 +50,21 @@ export interface OptimizationConfig {
   randomSearchSamples?: number;
   rankingMetric?: RankingMetric;
   seed?: number;
+  includeSnapshots?: boolean;
 }
 
 export interface OptimizationResultItem {
   id: string;
   parameters: ParameterSet;
+  parameterHash?: string;
+  datasetHash?: string;
   metrics: BacktestReportMetrics;
   rank: number;
   seed: number;
   executionDurationMs: number;
   timestamp: string;
+  snapshotId?: string;
+  snapshot?: BacktestSnapshotData;
 }
 
 export interface OptimizationProgressData {
@@ -69,7 +74,26 @@ export interface OptimizationProgressData {
   percentage: number;
   elapsedMs: number;
   estimatedRemainingMs: number;
+  estimatedRemainingTime: number;
+  averageRunDurationMs: number;
+  averageRunDuration: number;
+  estimatedCompletionTime?: string;
+  throughputRunsPerSecond: number;
   currentParameters?: ParameterSet;
+}
+
+export interface OptimizationSession {
+  sessionId: string;
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  status: OptimizationState;
+  datasetHash: string;
+  seed: number;
+  runCount: number;
+  completedRuns: number;
+  cancelledRuns: number;
+  failedRuns: number;
 }
 
 export interface OptimizationSnapshotData {
@@ -81,6 +105,7 @@ export interface OptimizationSnapshotData {
   totalRuns: number;
   results: OptimizationResultItem[];
   progress: OptimizationProgressData;
+  session?: OptimizationSession;
   timestamp: string;
   createdAt: string;
   updatedAt: string;

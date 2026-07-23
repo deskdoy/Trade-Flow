@@ -1,32 +1,44 @@
 import { EngineHealth, EngineLifecycle, SnapshotProvider } from '@tradeflow/core';
 import { Candle } from '@tradeflow/shared';
 import { CancellationToken } from '../cancellation/CancellationToken.ts';
+import { InMemoryOptimizationCache, OptimizationCacheProvider } from '../cache/OptimizationCache.ts';
+import { DatasetHasher } from '../dataset/DatasetHasher.ts';
 import {
   OptimizationEventEmitter,
   OptimizationEventListener,
   OptimizationEventType,
 } from '../events/OptimizationEvents.ts';
 import { ParameterGenerator } from '../parameters/ParameterGenerator.ts';
+import { ParameterHasher } from '../parameters/ParameterHasher.ts';
 import { ParameterSpace } from '../parameters/ParameterSpace.ts';
 import { ParameterValidator } from '../parameters/ParameterValidator.ts';
 import { ProgressTracker } from '../progress/ProgressTracker.ts';
+import { RandomProvider, SeededRandomProvider } from '../random/RandomProvider.ts';
+import { RankingStrategy } from '../ranking/RankingStrategy.ts';
 import { CustomComparator, ResultRanking } from '../ranking/ResultRanking.ts';
 import { OptimizationReport } from '../reports/OptimizationReport.ts';
 import { OptimizationRunner, StrategyFactory } from '../runner/OptimizationRunner.ts';
+import { ExecutionScheduler, SequentialExecutionScheduler } from '../scheduler/ExecutionScheduler.ts';
 import { OptimizationSnapshot } from '../snapshots/OptimizationSnapshot.ts';
 import {
   OptimizationConfig,
   OptimizationProgressData,
   OptimizationResultItem,
+  OptimizationSession,
   OptimizationSnapshotData,
   OptimizationState,
   ParameterRange,
   ParameterSet,
+  RankingMetric,
 } from '../types/index.ts';
 
 export interface OptimizationEngineOptions {
   config?: Partial<OptimizationConfig>;
   parameterRanges?: ParameterRange[];
+  cacheProvider?: OptimizationCacheProvider;
+  rankingStrategy?: RankingStrategy;
+  scheduler?: ExecutionScheduler;
+  randomProvider?: RandomProvider;
 }
 
 export class OptimizationEngine
@@ -37,12 +49,21 @@ export class OptimizationEngine
   private emitter: OptimizationEventEmitter = new OptimizationEventEmitter();
   private tracker: ProgressTracker = new ProgressTracker();
 
+  private cacheProvider?: OptimizationCacheProvider;
+  private rankingStrategy?: RankingStrategy;
+  private scheduler: ExecutionScheduler;
+  private randomProvider: RandomProvider;
+
   private state: OptimizationState = 'IDLE';
   private dataset: Candle[] = [];
   private results: OptimizationResultItem[] = [];
   private startTime: number = Date.now();
   private runDurationMs: number = 0;
   private createdAt: string = new Date().toISOString();
+
+  private sessionId: string = `opt-session-${Date.now()}`;
+  private startedAt?: string;
+  private finishedAt?: string;
 
   constructor(options: OptimizationEngineOptions = {}) {
     this.config = {
@@ -54,9 +75,15 @@ export class OptimizationEngine
       randomSearchSamples: options.config?.randomSearchSamples ?? 20,
       rankingMetric: options.config?.rankingMetric ?? 'netProfit',
       seed: options.config?.seed ?? 123456,
+      includeSnapshots: options.config?.includeSnapshots ?? false,
     };
 
     this.parameterSpace = new ParameterSpace(options.parameterRanges ?? []);
+    this.cacheProvider = options.cacheProvider;
+    this.rankingStrategy = options.rankingStrategy;
+    this.scheduler = options.scheduler ?? new SequentialExecutionScheduler();
+    this.randomProvider =
+      options.randomProvider ?? new SeededRandomProvider(this.config.seed ?? 123456);
   }
 
   // --- Engine Lifecycle Implementation ---
@@ -86,17 +113,23 @@ export class OptimizationEngine
     this.tracker.reset();
     this.cancellationToken.reset();
     this.runDurationMs = 0;
+    this.sessionId = `opt-session-${Date.now()}`;
+    this.startedAt = undefined;
+    this.finishedAt = undefined;
   }
 
   public destroy(): void {
     this.reset();
     this.emitter.clear();
+    if (this.cacheProvider) {
+      this.cacheProvider.clear();
+    }
   }
 
   // --- Snapshot Provider Implementation ---
 
   public getSnapshot(): OptimizationSnapshotData {
-    return OptimizationSnapshot.create(
+    const snapshot = OptimizationSnapshot.create(
       this.state,
       this.tracker.getProgress().completedRuns,
       this.tracker.getProgress().totalRuns,
@@ -104,6 +137,8 @@ export class OptimizationEngine
       this.tracker.getProgress(),
       this.createdAt
     );
+    snapshot.session = this.getSession();
+    return snapshot;
   }
 
   public restoreSnapshot(snapshot: OptimizationSnapshotData): void {
@@ -116,9 +151,32 @@ export class OptimizationEngine
     if (snapshot.createdAt) {
       this.createdAt = snapshot.createdAt;
     }
+    if (snapshot.session) {
+      this.sessionId = snapshot.session.sessionId;
+      this.startedAt = snapshot.session.startedAt;
+      this.finishedAt = snapshot.session.finishedAt;
+    }
   }
 
   // --- Public Optimization API ---
+
+  public getSession(): OptimizationSession {
+    const datasetHash = DatasetHasher.hash(this.dataset);
+    const progress = this.tracker.getProgress();
+    return {
+      sessionId: this.sessionId,
+      createdAt: this.createdAt,
+      startedAt: this.startedAt,
+      finishedAt: this.finishedAt,
+      status: this.state,
+      datasetHash,
+      seed: this.config.seed ?? 123456,
+      runCount: progress.totalRuns,
+      completedRuns: progress.completedRuns,
+      cancelledRuns: this.state === 'CANCELLED' ? 1 : 0,
+      failedRuns: this.state === 'ERROR' ? 1 : 0,
+    };
+  }
 
   public loadDataset(candles: Candle[]): void {
     if (!candles) {
@@ -165,6 +223,7 @@ export class OptimizationEngine
     if (this.state === 'RUNNING' || this.state === 'PAUSED') {
       this.cancellationToken.cancel();
       this.state = 'CANCELLED';
+      this.finishedAt = new Date().toISOString();
       const progress = this.tracker.getProgress();
       this.emitter.emit('optimization.cancelled', {
         completedRuns: progress.completedRuns,
@@ -178,6 +237,7 @@ export class OptimizationEngine
    */
   public run(
     strategyFactory: StrategyFactory,
+    rankingOrComparator?: RankingStrategy | RankingMetric | CustomComparator,
     customComparator?: CustomComparator
   ): OptimizationReport {
     // 1. Validate parameter space
@@ -202,7 +262,7 @@ export class OptimizationEngine
       ranges,
       this.config.mode,
       this.config.randomSearchSamples,
-      this.config.seed
+      this.randomProvider
     );
 
     if (combinations.length === 0) {
@@ -214,6 +274,8 @@ export class OptimizationEngine
 
     // 3. Initialize execution state & tracker
     this.state = 'RUNNING';
+    this.startedAt = new Date().toISOString();
+    this.finishedAt = undefined;
     this.cancellationToken.reset();
     this.results = [];
     this.tracker.start(combinations.length);
@@ -223,6 +285,7 @@ export class OptimizationEngine
       totalRuns: combinations.length,
     });
 
+    const datasetHash = DatasetHasher.hash(this.dataset);
     const startTime = Date.now();
     const runner = new OptimizationRunner(
       this.config,
@@ -230,37 +293,72 @@ export class OptimizationEngine
       strategyFactory,
       this.cancellationToken,
       this.emitter,
-      this.tracker
+      this.tracker,
+      this.scheduler
     );
 
-    // 4. Orchestrate backtest runs
+    // 4. Orchestrate backtest runs with optional caching
     for (let i = 0; i < combinations.length; i++) {
       if (this.cancellationToken.isCancelled()) {
         this.state = 'CANCELLED';
+        this.finishedAt = new Date().toISOString();
         break;
       }
 
       const params = combinations[i];
-      const runSeed = (this.config.seed ?? 123456) + i;
+      const paramHash = ParameterHasher.hash(params);
+      const cacheKey = `${datasetHash}:${paramHash}`;
 
-      try {
-        const item = runner.runSingle(i, combinations.length, params, runSeed);
+      let item: OptimizationResultItem | undefined;
+
+      if (this.cacheProvider && this.cacheProvider.has(cacheKey)) {
+        item = this.cacheProvider.get(cacheKey);
+      }
+
+      if (!item) {
+        const runSeed = (this.config.seed ?? 123456) + i;
+        try {
+          item = runner.runSingle(i, combinations.length, params, runSeed, datasetHash);
+          if (this.cacheProvider) {
+            this.cacheProvider.set(cacheKey, item);
+          }
+        } catch (err: any) {
+          this.state = 'ERROR';
+          this.finishedAt = new Date().toISOString();
+          const errMsg = err?.message ?? String(err);
+          this.emitter.emit('optimization.failed', { error: errMsg });
+          throw new Error(`Run ${i + 1} failed: ${errMsg}`);
+        }
+      } else {
+        // Record progress for cached hit
+        this.tracker.recordCompletedRun();
+        this.emitter.emit('optimization.progress', this.tracker.getProgress(params));
+      }
+
+      if (item) {
         this.results.push(item);
-      } catch (err: any) {
-        this.state = 'ERROR';
-        const errMsg = err?.message ?? String(err);
-        this.emitter.emit('optimization.failed', { error: errMsg });
-        throw new Error(`Run ${i + 1} failed: ${errMsg}`);
       }
     }
 
     this.runDurationMs = Date.now() - startTime;
+    this.finishedAt = new Date().toISOString();
 
-    // 5. Rank results
+    // 5. Determine ranking strategy or metric
+    let targetRanking: RankingStrategy | RankingMetric =
+      this.rankingStrategy ?? this.config.rankingMetric ?? 'netProfit';
+    let activeCustomComparator = customComparator;
+
+    if (typeof rankingOrComparator === 'function') {
+      activeCustomComparator = rankingOrComparator as CustomComparator;
+    } else if (rankingOrComparator) {
+      targetRanking = rankingOrComparator as RankingStrategy | RankingMetric;
+    }
+
+    // 6. Rank results
     const rankedResults = ResultRanking.rank(
       this.results,
-      this.config.rankingMetric,
-      customComparator
+      targetRanking,
+      activeCustomComparator
     );
     this.results = rankedResults;
 
@@ -273,11 +371,12 @@ export class OptimizationEngine
       });
     }
 
-    return new OptimizationReport(
-      this.results,
-      this.config.rankingMetric ?? 'netProfit',
-      this.runDurationMs
-    );
+    const rankingMetric: RankingMetric =
+      typeof targetRanking === 'string'
+        ? targetRanking
+        : (this.config.rankingMetric ?? 'netProfit');
+
+    return new OptimizationReport(this.results, rankingMetric, this.runDurationMs);
   }
 
   // --- Getters ---

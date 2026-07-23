@@ -1,3 +1,4 @@
+import { RandomProvider, SeededRandomProvider } from '../random/RandomProvider.ts';
 import { OptimizationMode, ParameterRange, ParameterSet } from '../types/index.ts';
 
 export class ParameterGenerator {
@@ -52,20 +53,19 @@ export class ParameterGenerator {
   }
 
   /**
-   * Generates random search samples from parameter space using pseudo-random seed generator
+   * Generates random search samples from parameter space using RandomProvider or numeric seed
    */
   public static generateRandomSearch(
     ranges: ParameterRange[],
     sampleCount: number,
-    seed: number = 123456
+    randomOrSeed: RandomProvider | number = 123456
   ): ParameterSet[] {
     if (ranges.length === 0 || sampleCount <= 0) return [];
 
-    let currentSeed = seed;
-    const lcg = () => {
-      currentSeed = (currentSeed * 1664525 + 1013904223) % 4294967296;
-      return currentSeed / 4294967296;
-    };
+    const randomProvider: RandomProvider =
+      typeof randomOrSeed === 'number'
+        ? new SeededRandomProvider(randomOrSeed)
+        : randomOrSeed;
 
     const results: ParameterSet[] = [];
     const grid = this.generateGrid(ranges);
@@ -76,7 +76,7 @@ export class ParameterGenerator {
 
     const copy = [...grid];
     for (let i = 0; i < sampleCount && copy.length > 0; i++) {
-      const randIdx = Math.floor(lcg() * copy.length);
+      const randIdx = Math.floor(randomProvider.next() * copy.length);
       results.push(copy.splice(randIdx, 1)[0]);
     }
 
@@ -90,12 +90,12 @@ export class ParameterGenerator {
     ranges: ParameterRange[],
     mode: OptimizationMode,
     sampleCount: number = 20,
-    seed: number = 123456
+    randomOrSeed: RandomProvider | number = 123456
   ): ParameterSet[] {
     if (mode === 'GRID_SEARCH') {
       return this.generateGrid(ranges);
     } else {
-      return this.generateRandomSearch(ranges, sampleCount, seed);
+      return this.generateRandomSearch(ranges, sampleCount, randomOrSeed);
     }
   }
 }

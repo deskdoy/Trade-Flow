@@ -21,7 +21,7 @@ export class ParameterValidator {
         return { valid: false, error: `Parameter ${range.name} must have at least one categorical option` };
       }
     } else {
-      return { valid: false, error: `Parameter ${range.name} has unknown type` };
+      return { valid: false, error: `Parameter ${(range as any).name} has unknown type` };
     }
 
     return { valid: true };

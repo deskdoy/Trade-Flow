@@ -1,37 +1,31 @@
 import { OptimizationResultItem, RankingMetric } from '../types/index.ts';
+import {
+  CustomRankingStrategy,
+  MetricRankingStrategy,
+  RankingStrategy,
+} from './RankingStrategy.ts';
 
 export type CustomComparator = (a: OptimizationResultItem, b: OptimizationResultItem) => number;
 
 export class ResultRanking {
   /**
-   * Ranks optimization items in descending order of performance
+   * Ranks optimization items in descending order of performance using a strategy or metric
    */
   public static rank(
     results: OptimizationResultItem[],
-    metric: RankingMetric = 'netProfit',
+    strategyOrMetric: RankingStrategy | RankingMetric = 'netProfit',
     customComparator?: CustomComparator
   ): OptimizationResultItem[] {
-    const copy = [...results];
+    let strategy: RankingStrategy;
 
-    const comparator = customComparator ?? this.getDefaultComparator(metric);
+    if (customComparator) {
+      strategy = new CustomRankingStrategy('Custom', customComparator);
+    } else if (typeof strategyOrMetric === 'string') {
+      strategy = new MetricRankingStrategy(strategyOrMetric);
+    } else {
+      strategy = strategyOrMetric;
+    }
 
-    copy.sort(comparator);
-
-    return copy.map((item, index) => ({
-      ...item,
-      rank: index + 1,
-    }));
-  }
-
-  private static getDefaultComparator(metric: RankingMetric): CustomComparator {
-    return (a, b) => {
-      if (metric === 'maxDrawdown' || metric === 'maxDrawdownPercent') {
-        return a.metrics[metric] - b.metrics[metric];
-      }
-
-      const valA = (a.metrics as any)[metric] ?? 0;
-      const valB = (b.metrics as any)[metric] ?? 0;
-      return valB - valA;
-    };
+    return strategy.rank(results);
   }
 }

@@ -3,7 +3,12 @@ import { Strategy, StrategyEngine } from '@tradeflow/strategy-engine';
 import { BacktestingEngine } from '@tradeflow/backtesting-engine';
 import { CancellationToken } from '../cancellation/CancellationToken.ts';
 import { OptimizationEventEmitter } from '../events/OptimizationEvents.ts';
+import { ParameterHasher } from '../parameters/ParameterHasher.ts';
 import { ProgressTracker } from '../progress/ProgressTracker.ts';
+import {
+  ExecutionScheduler,
+  SequentialExecutionScheduler,
+} from '../scheduler/ExecutionScheduler.ts';
 import {
   OptimizationConfig,
   OptimizationResultItem,
@@ -19,6 +24,7 @@ export class OptimizationRunner {
   private cancellationToken: CancellationToken;
   private emitter: OptimizationEventEmitter;
   private tracker: ProgressTracker;
+  private scheduler: ExecutionScheduler;
 
   constructor(
     config: OptimizationConfig,
@@ -26,7 +32,8 @@ export class OptimizationRunner {
     strategyFactory: StrategyFactory,
     cancellationToken: CancellationToken,
     emitter: OptimizationEventEmitter,
-    tracker: ProgressTracker
+    tracker: ProgressTracker,
+    scheduler?: ExecutionScheduler
   ) {
     this.config = config;
     this.dataset = dataset;
@@ -34,6 +41,7 @@ export class OptimizationRunner {
     this.cancellationToken = cancellationToken;
     this.emitter = emitter;
     this.tracker = tracker;
+    this.scheduler = scheduler ?? new SequentialExecutionScheduler();
   }
 
   /**
@@ -43,7 +51,8 @@ export class OptimizationRunner {
     runIndex: number,
     totalRuns: number,
     parameters: ParameterSet,
-    seed: number
+    seed: number,
+    datasetHash?: string
   ): OptimizationResultItem {
     const runStartTime = Date.now();
 
@@ -79,15 +88,28 @@ export class OptimizationRunner {
     const report = backtester.generateReport();
     const metrics = report.getMetrics();
     const executionDurationMs = Date.now() - runStartTime;
+    const parameterHash = ParameterHasher.hash(parameters);
+    const simId = `sim-${runIndex + 1}-${Date.now()}`;
+
+    let snapshotData;
+    let snapshotId;
+    if (this.config.includeSnapshots) {
+      snapshotData = backtester.getSnapshot();
+      snapshotId = `snap-${simId}`;
+    }
 
     const resultItem: OptimizationResultItem = {
-      id: `sim-${runIndex + 1}-${Date.now()}`,
+      id: simId,
       parameters,
+      parameterHash,
+      datasetHash,
       metrics,
       rank: 0,
       seed,
       executionDurationMs,
       timestamp: new Date().toISOString(),
+      snapshotId,
+      snapshot: snapshotData,
     };
 
     // 6. Record progress & emit run completed
@@ -104,5 +126,37 @@ export class OptimizationRunner {
     );
 
     return resultItem;
+  }
+
+  /**
+   * Orchestrates multi-run execution via ExecutionScheduler
+   */
+  public runAll(
+    combinations: ParameterSet[],
+    baseSeed: number,
+    datasetHash?: string
+  ): OptimizationResultItem[] {
+    const tasks = combinations.map((params, index) => {
+      return () => {
+        if (this.cancellationToken.isCancelled()) {
+          throw new Error('CANCELED');
+        }
+        const runSeed = baseSeed + index;
+        return this.runSingle(index, combinations.length, params, runSeed, datasetHash);
+      };
+    });
+
+    const results: OptimizationResultItem[] = [];
+    try {
+      this.scheduler.execute(tasks, (result) => {
+        results.push(result);
+      });
+    } catch (err: any) {
+      if (err.message !== 'CANCELED') {
+        throw err;
+      }
+    }
+
+    return results;
   }
 }
