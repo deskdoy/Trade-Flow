@@ -168,8 +168,8 @@ async function runTests() {
       return new TestParamStrategy('test-strat', params.period, params.riskPct);
     });
 
-    assert(startedEmitted === true, 'Started event emitted');
-    assert(completedEmitted === true, 'Completed event emitted');
+    assert(Boolean(startedEmitted), 'Started event emitted');
+    assert(Boolean(completedEmitted), 'Completed event emitted');
     assert(runsCompleted === 4, '4 run completed events received');
     assert(report.getResults().length === 4, 'Report contains 4 results');
     assert(report.getBestResult() !== undefined, 'Report has best result');
@@ -209,7 +209,7 @@ async function runTests() {
     });
 
     assert(engine.getState() === 'CANCELLED', 'Engine state is CANCELLED');
-    assert(cancelEmitted === true, 'Cancellation event emitted');
+    assert(Boolean(cancelEmitted), 'Cancellation event emitted');
     assert(report.getResults().length < 5, 'Results contain partial runs');
     console.log('✓ Cancellation tests passed');
   }

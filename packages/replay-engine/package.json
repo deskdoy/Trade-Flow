@@ -1,0 +1,25 @@
+{
+  "name": "@tradeflow/replay-engine",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "test": "tsx src/__tests__/ReplayEngine.test.ts"
+  },
+  "dependencies": {
+    "@tradeflow/chart-engine": "workspace:*",
+    "@tradeflow/core": "workspace:*",
+    "@tradeflow/indicators": "workspace:*",
+    "@tradeflow/market-data": "workspace:*",
+    "@tradeflow/order-management": "workspace:*",
+    "@tradeflow/paper-trading": "workspace:*",
+    "@tradeflow/portfolio-engine": "workspace:*",
+    "@tradeflow/shared": "workspace:*",
+    "@tradeflow/strategy-engine": "workspace:*",
+    "@tradeflow/trading-domain": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}

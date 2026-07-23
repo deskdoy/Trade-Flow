@@ -69,6 +69,9 @@
       ],
       "@tradeflow/optimization-engine": [
         "./packages/optimization-engine/src/index.ts"
+      ],
+      "@tradeflow/replay-engine": [
+        "./packages/replay-engine/src/index.ts"
       ]
     },
     "allowImportingTsExtensions": true,
