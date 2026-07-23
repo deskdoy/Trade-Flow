@@ -1,23 +1,44 @@
 import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, DeepPartial, ChartOptions } from "lightweight-charts";
 import { Candle } from "@tradeflow/shared";
+import { EngineHealth, EngineLifecycle } from "@tradeflow/core";
 
-export class ChartEngine {
+export class ChartEngine implements EngineLifecycle {
   private chart: IChartApi | null = null;
   private candlestickSeries: ISeriesApi<"Candlestick"> | null = null;
   private lineSeries: Map<string, ISeriesApi<"Line">> = new Map();
   private drawingSeries: Map<string, ISeriesApi<"Line">> = new Map();
   private candleTimes: string[] = [];
   private container: HTMLElement;
+  private startTime: number = Date.now();
 
   constructor(container: HTMLElement, theme: "light" | "dark" = "dark") {
     this.container = container;
-    this.initialize(theme);
+    this.initChart(theme);
+  }
+
+  public getVersion(): string {
+    return '0.1.0';
+  }
+
+  public getHealth(): EngineHealth {
+    return {
+      healthy: this.chart !== null,
+      version: this.getVersion(),
+      uptime: Math.floor((Date.now() - this.startTime) / 1000),
+      objectCount: this.lineSeries.size + this.drawingSeries.size,
+    };
+  }
+
+  public reset(): void {
+    this.clearLineSeries();
+    this.clearDrawings();
   }
 
   /**
    * Initializes the lightweight chart inside the target container
    */
-  private initialize(theme: "light" | "dark"): void {
+  private initChart(theme: "light" | "dark"): void {
+
     const isDark = theme === "dark";
     
     const chartOptions: DeepPartial<ChartOptions> = {

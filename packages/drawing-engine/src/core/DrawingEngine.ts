@@ -1,3 +1,4 @@
+import { EngineHealth, EngineLifecycle, SnapshotProvider } from '@tradeflow/core';
 import { DrawingRegistry } from '../registry/DrawingRegistry.ts';
 import { DrawingEventEmitter, DrawingEventListener, DrawingEventType } from '../events/DrawingEvents.ts';
 import { Serializer } from '../serialization/Serializer.ts';
@@ -9,15 +10,55 @@ import {
 import { DrawingPlugin } from '../plugins/DrawingPlugin.ts';
 import { generateDrawingId } from '../utils/index.ts';
 
-export class DrawingEngine {
+export class DrawingEngine implements SnapshotProvider<string>, EngineLifecycle {
   private drawings: Map<string, DrawingObject> = new Map();
   private selectedDrawingId: string | null = null;
   private registry: DrawingRegistry;
   private events: DrawingEventEmitter = new DrawingEventEmitter();
+  private startTime: number = Date.now();
 
   constructor(registry?: DrawingRegistry) {
     this.registry = registry ?? new DrawingRegistry(true);
   }
+
+  public initialize(): void {
+    // Lifecycle initialization
+  }
+
+  public getVersion(): string {
+    return '1.0.0';
+  }
+
+  public getHealth(): EngineHealth {
+    return {
+      healthy: true,
+      version: this.getVersion(),
+      uptime: Math.floor((Date.now() - this.startTime) / 1000),
+      objectCount: this.drawings.size,
+    };
+  }
+
+  public reset(): void {
+    this.clearDrawings();
+  }
+
+  public destroy(): void {
+    this.clearDrawings();
+    this.events.removeAllListeners();
+  }
+
+  public getSnapshot(): string {
+    return this.serialize();
+  }
+
+  public restoreSnapshot(snapshot: string): void {
+    this.deserialize(snapshot);
+  }
+
+  private emitEvent<K extends DrawingEventType>(event: K, payload: any): void {
+    this.events.emit(event, payload);
+  }
+
 
   /**
    * Access the underlying DrawingRegistry
@@ -54,6 +95,7 @@ export class DrawingEngine {
     this.drawings.set(drawing.id, drawing);
 
     this.events.emit('drawing.created', { drawing });
+    this.events.emit('drawing.object.created', { drawing });
     return drawing;
   }
 
@@ -71,6 +113,7 @@ export class DrawingEngine {
     drawing.destroy();
     this.drawings.delete(id);
     this.events.emit('drawing.deleted', { id });
+    this.events.emit('drawing.object.deleted', { id });
   }
 
   /**
@@ -96,6 +139,7 @@ export class DrawingEngine {
     }
 
     this.events.emit('drawing.updated', { drawing });
+    this.events.emit('drawing.object.updated', { drawing });
     return drawing;
   }
 
@@ -113,7 +157,9 @@ export class DrawingEngine {
       if (prev) {
         prev.selected = false;
         this.events.emit('drawing.deselected', { drawing: prev });
+        this.events.emit('drawing.object.deselected', { drawing: prev });
         this.events.emit('drawing.updated', { drawing: prev });
+        this.events.emit('drawing.object.updated', { drawing: prev });
       }
     }
 
@@ -127,10 +173,13 @@ export class DrawingEngine {
         next.selected = true;
         currentSelected = next;
         this.events.emit('drawing.selected', { drawing: next });
+        this.events.emit('drawing.object.selected', { drawing: next });
         this.events.emit('drawing.updated', { drawing: next });
+        this.events.emit('drawing.object.updated', { drawing: next });
       }
     } else {
       this.events.emit('drawing.selected', { drawing: null });
+      this.events.emit('drawing.object.selected', { drawing: null });
     }
   }
 

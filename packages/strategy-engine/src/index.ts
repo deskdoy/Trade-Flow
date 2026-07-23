@@ -12,6 +12,7 @@ export type {
   TradingIntent,
   TradingIntentAction,
   StrategyContext,
+  StrategyEngineSnapshotData,
 } from './types/index.ts';
 
 export type {

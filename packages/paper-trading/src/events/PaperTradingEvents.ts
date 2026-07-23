@@ -6,6 +6,7 @@ export interface PaperTradingEventPayloadMap {
   'paper.order.placed': { order: OrderData };
   'paper.order.cancelled': { order: OrderData; reason?: string };
   'paper.order.filled': { order: OrderData; trade: TradeData };
+  'paper.trade.executed': { order: OrderData; trade: TradeData };
   'paper.position.opened': { position: PositionData };
   'paper.position.updated': { position: PositionData; realizedPnL?: number };
   'paper.position.closed': { position: PositionData; realizedPnL: number; exitPrice: number };

@@ -16,6 +16,10 @@ export interface ExecutionEventPayloadMap {
   'execution.completed': { request: ExecutionRequest; result: ExecutionResult };
   'execution.failed': { request: ExecutionRequest; error: string; result?: ExecutionResult };
   'execution.cancelled': { request: ExecutionRequest; reason?: string };
+
+  'execution.request.started': { request: ExecutionRequest; targetId: string };
+  'execution.request.completed': { request: ExecutionRequest; result: ExecutionResult };
+  'execution.request.failed': { request: ExecutionRequest; error: string; result?: ExecutionResult };
 }
 
 export type ExecutionEventType = keyof ExecutionEventPayloadMap;

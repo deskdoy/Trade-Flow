@@ -1,19 +1,85 @@
+import { EngineHealth, EngineLifecycle, SnapshotProvider } from '@tradeflow/core';
+import { ValidationResult } from '@tradeflow/trading-domain';
 import { StrategyContext } from '../context/StrategyContext.ts';
 import { StrategyEventEmitter, StrategyEventListener, StrategyEventType } from '../events/StrategyEvents.ts';
 import { TradingIntent } from '../intent/TradingIntent.ts';
 import { StrategyRegistry } from '../registry/StrategyRegistry.ts';
-import { Strategy, StrategyMetadata } from '../types/index.ts';
+import { Strategy, StrategyEngineSnapshotData, StrategyMetadata } from '../types/index.ts';
 import { StrategyValidator } from '../validation/StrategyValidator.ts';
 
-export class StrategyEngine {
+export class StrategyEngine implements SnapshotProvider<StrategyEngineSnapshotData>, EngineLifecycle {
   private registry: StrategyRegistry = new StrategyRegistry();
   private emitter: StrategyEventEmitter = new StrategyEventEmitter();
   private intentsBuffer: TradingIntent[] = [];
+  private startTime: number = Date.now();
+
+  public initialize(): void {
+    // Lifecycle initialization
+  }
+
+  public getVersion(): string {
+    return '0.1.0';
+  }
+
+  public getHealth(): EngineHealth {
+    return {
+      healthy: true,
+      version: this.getVersion(),
+      uptime: Math.floor((Date.now() - this.startTime) / 1000),
+      objectCount: this.registry.getAll().length,
+      eventsPublished: this.intentsBuffer.length,
+    };
+  }
+
+  public reset(): void {
+    this.registry.clear();
+    this.intentsBuffer = [];
+  }
+
+  public destroy(): void {
+    this.reset();
+    this.emitter.clear();
+  }
+
+  public validate(strategy: Strategy): ValidationResult {
+    const existingIds = new Set(this.registry.getAll().map((s) => s.metadata.id));
+    return StrategyValidator.validateRegistration(strategy, existingIds);
+  }
+
+  public getSnapshot(): StrategyEngineSnapshotData {
+    return {
+      strategies: this.registry.getAll().map((s) => ({
+        id: s.metadata.id,
+        isEnabled: s.isEnabled,
+        parameters: s.metadata.parameters,
+      })),
+      intentsBuffer: [...this.intentsBuffer],
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  public restoreSnapshot(snapshot: StrategyEngineSnapshotData): void {
+    if (snapshot.intentsBuffer) {
+      this.intentsBuffer = [...snapshot.intentsBuffer];
+    }
+    if (snapshot.strategies) {
+      for (const item of snapshot.strategies) {
+        const strategy = this.registry.get(item.id);
+        if (strategy) {
+          strategy.isEnabled = item.isEnabled;
+          if (item.parameters && strategy.initialize) {
+            strategy.initialize(item.parameters);
+          }
+        }
+      }
+    }
+  }
 
   /**
    * Registers a strategy with validation
    */
   public registerStrategy(strategy: Strategy): void {
+
     const existingIds = new Set(this.registry.getAll().map((s) => s.metadata.id));
     const valResult = StrategyValidator.validateRegistration(strategy, existingIds);
 

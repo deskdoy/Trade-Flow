@@ -1,3 +1,4 @@
+import { EngineHealth, EngineLifecycle, SnapshotProvider } from '@tradeflow/core';
 import { PositionData } from '@tradeflow/trading-domain';
 import { EquityCurve } from '../equity/EquityCurve.ts';
 import { PortfolioEventEmitter, PortfolioEventListener, PortfolioEventType } from '../events/PortfolioEvents.ts';
@@ -16,21 +17,45 @@ import {
   TradingStatistics,
 } from '../types/index.ts';
 
-export class PortfolioEngine {
+export class PortfolioEngine implements SnapshotProvider<PortfolioSnapshotData>, EngineLifecycle {
   private positionBook: PositionBook = new PositionBook();
   private holdingsManager: HoldingsManager;
   private equityCurve: EquityCurve;
   private performanceTracker: PerformanceTracker = new PerformanceTracker();
   private statisticsEngine: StatisticsEngine = new StatisticsEngine();
   private emitter: PortfolioEventEmitter = new PortfolioEventEmitter();
+  private startTime: number = Date.now();
+  private initialBalance: number;
 
   constructor(options: PortfolioEngineOptions = {}) {
     const initialBalance = options.initialBalance ?? 100000;
     const defaultLeverage = options.defaultLeverage ?? 1;
     const maxEquityHistoryPoints = options.maxEquityHistoryPoints ?? 1000;
 
+    this.initialBalance = initialBalance;
     this.holdingsManager = new HoldingsManager(initialBalance, defaultLeverage);
     this.equityCurve = new EquityCurve(initialBalance, maxEquityHistoryPoints);
+  }
+
+  public initialize(): void {
+    // Lifecycle initialization
+  }
+
+  public getVersion(): string {
+    return '0.1.0';
+  }
+
+  public getHealth(): EngineHealth {
+    return {
+      healthy: true,
+      version: this.getVersion(),
+      uptime: Math.floor((Date.now() - this.startTime) / 1000),
+      objectCount: this.getPositions().length + this.getClosedPositions().length,
+    };
+  }
+
+  public destroy(): void {
+    this.emitter.clear();
   }
 
   // --- Public Getters ---

@@ -8,6 +8,7 @@
     "build": "tsc"
   },
   "dependencies": {
+    "@tradeflow/core": "workspace:*",
     "lightweight-charts": "^4.2.1"
   }
 }

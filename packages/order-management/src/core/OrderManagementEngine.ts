@@ -1,3 +1,4 @@
+import { EngineHealth, EngineLifecycle, SnapshotProvider } from '@tradeflow/core';
 import { OrderData, OrderSide, OrderStatus, OrderType, PositionSide } from '@tradeflow/trading-domain';
 import { RiskEngine } from '@tradeflow/risk-engine';
 import { PaperOrderParams } from '@tradeflow/paper-trading';
@@ -20,7 +21,7 @@ import {
 } from '../types/index.ts';
 import { OrderRequestValidator } from '../validation/OrderRequestValidator.ts';
 
-export class OrderManagementEngine {
+export class OrderManagementEngine implements SnapshotProvider<OMSOrderRecord[]>, EngineLifecycle {
   private orderManager: OrderManager = new OrderManager();
   private orderRouter: OrderRouter;
   private riskEngine: RiskEngine;
@@ -28,6 +29,7 @@ export class OrderManagementEngine {
   private lifecycle: OrderLifecycle = new OrderLifecycle();
   private validator: OrderRequestValidator = new OrderRequestValidator();
   private emitter: OrderEventEmitter = new OrderEventEmitter();
+  private startTime: number = Date.now();
 
   constructor(
     riskEngine?: RiskEngine,
@@ -38,6 +40,44 @@ export class OrderManagementEngine {
     this.orderRouter = orderRouter || new OrderRouter();
     this.executionEngine = executionEngine || new ExecutionEngine(this.orderRouter as any);
   }
+
+  public initialize(): void {
+    // Lifecycle initialization
+  }
+
+  public getVersion(): string {
+    return '0.1.0';
+  }
+
+  public getHealth(): EngineHealth {
+    return {
+      healthy: true,
+      version: this.getVersion(),
+      uptime: Math.floor((Date.now() - this.startTime) / 1000),
+      objectCount: this.orderManager.getAllOrders().length,
+    };
+  }
+
+  public reset(): void {
+    this.orderManager.clear();
+  }
+
+  public destroy(): void {
+    this.reset();
+    this.emitter.clear();
+  }
+
+  public getSnapshot(): OMSOrderRecord[] {
+    return this.orderManager.getAllOrders();
+  }
+
+  public restoreSnapshot(snapshot: OMSOrderRecord[]): void {
+    this.reset();
+    for (const record of snapshot) {
+      this.orderManager.saveOrder(record);
+    }
+  }
+
 
   public getRiskEngine(): RiskEngine {
     return this.riskEngine;

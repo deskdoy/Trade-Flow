@@ -23,6 +23,17 @@ export interface Strategy {
   onDisable?(): void;
 }
 
+export interface StrategyEngineSnapshotData {
+  strategies: Array<{
+    id: string;
+    isEnabled: boolean;
+    parameters?: Record<string, unknown>;
+  }>;
+  intentsBuffer: TradingIntent[];
+  timestamp: string;
+}
+
 export type { ValidationError, ValidationResult };
 export type { TradingIntent, TradingIntentAction };
 export type { StrategyContext };
+

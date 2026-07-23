@@ -1,3 +1,4 @@
+import { EngineHealth, EngineLifecycle, SnapshotProvider } from '@tradeflow/core';
 import { PositionData } from '@tradeflow/trading-domain';
 import { PaperAccountState, PaperOrderParams, PaperTradingEngine } from '@tradeflow/paper-trading';
 import { ExposureCalculator } from '../exposure/ExposureCalculator.ts';
@@ -28,7 +29,7 @@ export const DEFAULT_RISK_LIMITS: RiskLimits = {
   maxOpenPositions: 10,
 };
 
-export class RiskEngine {
+export class RiskEngine implements SnapshotProvider<RiskLimits>, EngineLifecycle {
   private limits: RiskLimits;
   private emitter: RiskEventEmitter = new RiskEventEmitter();
   private marginCalculator: MarginCalculator = new MarginCalculator();
@@ -37,10 +38,46 @@ export class RiskEngine {
   private exposureCalculator: ExposureCalculator = new ExposureCalculator();
   private positionSizer: PositionSizer = new PositionSizer();
   private validator: RiskValidator = new RiskValidator();
+  private startTime: number = Date.now();
 
   constructor(customLimits?: Partial<RiskLimits>) {
     this.limits = { ...DEFAULT_RISK_LIMITS, ...customLimits };
   }
+
+  public initialize(): void {
+    // Lifecycle initialization
+  }
+
+  public getVersion(): string {
+    return '0.1.0';
+  }
+
+  public getHealth(): EngineHealth {
+    return {
+      healthy: true,
+      version: this.getVersion(),
+      uptime: Math.floor((Date.now() - this.startTime) / 1000),
+      objectCount: Object.keys(this.limits).length,
+    };
+  }
+
+  public reset(): void {
+    this.limits = { ...DEFAULT_RISK_LIMITS };
+  }
+
+  public destroy(): void {
+    this.reset();
+    this.emitter.clear();
+  }
+
+  public getSnapshot(): RiskLimits {
+    return this.getLimits();
+  }
+
+  public restoreSnapshot(snapshot: RiskLimits): void {
+    this.limits = { ...snapshot };
+  }
+
 
   public getLimits(): RiskLimits {
     return { ...this.limits };

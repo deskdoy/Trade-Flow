@@ -1,3 +1,4 @@
+import { EngineHealth, EngineLifecycle } from '@tradeflow/core';
 import { DrawingEngine } from '@tradeflow/drawing-engine';
 import { DragController } from '../dragging/DragController.ts';
 import { InteractionEventEmitter, InteractionEventListener, InteractionEventType } from '../events/InteractionEvents.ts';
@@ -12,9 +13,10 @@ import {
   SnappingOptions,
 } from '../types/index.ts';
 
-export class InteractionEngine {
+export class InteractionEngine implements EngineLifecycle {
   private drawingEngine: DrawingEngine;
   private events: InteractionEventEmitter = new InteractionEventEmitter();
+  private startTime: number = Date.now();
 
   private hitTester: HitTester;
   private selectionController: SelectionController;
@@ -41,6 +43,28 @@ export class InteractionEngine {
       this.events
     );
   }
+
+  public initialize(): void {
+    // Lifecycle initialization
+  }
+
+  public getVersion(): string {
+    return '0.1.0';
+  }
+
+  public getHealth(): EngineHealth {
+    return {
+      healthy: true,
+      version: this.getVersion(),
+      uptime: Math.floor((Date.now() - this.startTime) / 1000),
+      objectCount: this.getSelectionState().selectedIds.length,
+    };
+  }
+
+  public reset(): void {
+    this.clearSelection();
+  }
+
 
   /**
    * Attaches interaction engine listeners to DOM chart container

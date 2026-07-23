@@ -8,6 +8,7 @@
     "test": "tsx src/__tests__/InteractionEngine.test.ts"
   },
   "dependencies": {
+    "@tradeflow/core": "workspace:*",
     "@tradeflow/drawing-engine": "workspace:*"
   },
   "devDependencies": {

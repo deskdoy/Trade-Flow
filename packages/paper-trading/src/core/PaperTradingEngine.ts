@@ -1,3 +1,4 @@
+import { EngineHealth, EngineLifecycle, SnapshotProvider } from '@tradeflow/core';
 import { MarginMode, OrderData, OrderType, PositionData } from '@tradeflow/trading-domain';
 import { AccountManager } from '../account/AccountManager.ts';
 import {
@@ -15,7 +16,13 @@ import {
   PriceTick,
 } from '../types/index.ts';
 
-export class PaperTradingEngine {
+export interface PaperTradingSnapshot {
+  accountState: PaperAccountState;
+  orders: OrderData[];
+  positions: PositionData[];
+}
+
+export class PaperTradingEngine implements SnapshotProvider<PaperTradingSnapshot>, EngineLifecycle {
   private orderManager: OrderManager = new OrderManager();
   private positionManager: PositionManager = new PositionManager();
   private accountManager: AccountManager;
@@ -23,12 +30,63 @@ export class PaperTradingEngine {
   private lastPrices: Map<string, number> = new Map();
   private defaultLeverage: number;
   private defaultMarginMode: MarginMode;
+  private initialConfig: PaperAccountConfig;
+  private startTime: number = Date.now();
 
   constructor(config: PaperAccountConfig) {
+    this.initialConfig = config;
     this.accountManager = new AccountManager(config);
     this.defaultLeverage = config.defaultLeverage ?? 1;
     this.defaultMarginMode = config.marginMode ?? MarginMode.CROSS;
   }
+
+  public initialize(): void {
+    // Lifecycle initialization
+  }
+
+  public getVersion(): string {
+    return '0.1.0';
+  }
+
+  public getHealth(): EngineHealth {
+    return {
+      healthy: true,
+      version: this.getVersion(),
+      uptime: Math.floor((Date.now() - this.startTime) / 1000),
+      objectCount: this.getOpenPositions().length + this.getOrders().length,
+    };
+  }
+
+  public reset(): void {
+    this.accountManager = new AccountManager(this.initialConfig);
+    this.orderManager = new OrderManager();
+    this.positionManager = new PositionManager();
+    this.lastPrices.clear();
+  }
+
+  public destroy(): void {
+    this.reset();
+    this.emitter.clear();
+  }
+
+  public getSnapshot(): PaperTradingSnapshot {
+    return {
+      accountState: this.getAccountState(),
+      orders: this.getOrders(),
+      positions: this.getOpenPositions(),
+    };
+  }
+
+  public restoreSnapshot(snapshot: PaperTradingSnapshot): void {
+    this.reset();
+    if (snapshot.accountState) {
+      this.accountManager = new AccountManager({
+        initialBalance: snapshot.accountState.balance,
+        currency: snapshot.accountState.currency,
+      });
+    }
+  }
+
 
   /**
    * Places a paper order and attempts immediate execution for MARKET orders if market price exists
@@ -73,6 +131,7 @@ export class PaperTradingEngine {
     // 2. Process executions into positions
     for (const { filledOrder, trade } of executions) {
       this.emitter.emit('paper.order.filled', { order: filledOrder, trade });
+      this.emitter.emit('paper.trade.executed', { order: filledOrder, trade });
 
       const updateResult = this.positionManager.processTrade(
         trade,

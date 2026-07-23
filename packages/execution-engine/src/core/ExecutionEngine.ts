@@ -1,3 +1,4 @@
+import { EngineHealth, EngineLifecycle, SnapshotProvider } from '@tradeflow/core';
 import { ExecutionAcknowledgement } from '../acknowledgement/ExecutionAcknowledgement.ts';
 import { ExecutionEventEmitter, ExecutionEventListener, ExecutionEventType } from '../events/ExecutionEvents.ts';
 import { ExecutionLifecycle } from '../lifecycle/ExecutionLifecycle.ts';
@@ -13,15 +14,54 @@ import {
   ExecutionTargetType,
 } from '../types/index.ts';
 
-export class ExecutionEngine {
+export class ExecutionEngine implements SnapshotProvider<ExecutionRequest[]>, EngineLifecycle {
   private router: ExecutionRouter;
   private queue: ExecutionQueue = new ExecutionQueue();
   private lifecycle: ExecutionLifecycle = new ExecutionLifecycle();
   private emitter: ExecutionEventEmitter = new ExecutionEventEmitter();
+  private startTime: number = Date.now();
 
   constructor(router?: ExecutionRouter) {
     this.router = router || new ExecutionRouter();
   }
+
+  public initialize(): void {
+    // Lifecycle initialization
+  }
+
+  public getVersion(): string {
+    return '0.1.0';
+  }
+
+  public getHealth(): EngineHealth {
+    return {
+      healthy: true,
+      version: this.getVersion(),
+      uptime: Math.floor((Date.now() - this.startTime) / 1000),
+      objectCount: this.queue.getAllItems().length,
+    };
+  }
+
+  public reset(): void {
+    this.queue.clear();
+  }
+
+  public destroy(): void {
+    this.reset();
+    this.emitter.clear();
+  }
+
+  public getSnapshot(): ExecutionRequest[] {
+    return this.queue.getAllItems().map((item) => item.request);
+  }
+
+  public restoreSnapshot(snapshot: ExecutionRequest[]): void {
+    this.reset();
+    for (const req of snapshot) {
+      this.queue.enqueue(req);
+    }
+  }
+
 
   public getRouter(): ExecutionRouter {
     return this.router;
@@ -83,6 +123,7 @@ export class ExecutionEngine {
     // 4. Update Queue Status to STARTED
     this.queue.updateStatus(request.requestId, ExecutionStatus.STARTED);
     this.emitter.emit('execution.started', { request, targetId: target.id });
+    this.emitter.emit('execution.request.started', { request, targetId: target.id });
 
     // 5. Send to Target
     this.queue.updateStatus(request.requestId, ExecutionStatus.EXECUTING);
@@ -114,6 +155,7 @@ export class ExecutionEngine {
       );
 
       this.emitter.emit('execution.failed', { request, error: errorMsg, result });
+      this.emitter.emit('execution.request.failed', { request, error: errorMsg, result });
       return result;
     }
 
@@ -124,13 +166,20 @@ export class ExecutionEngine {
 
       if (result.status === ExecutionStatus.COMPLETED) {
         this.emitter.emit('execution.completed', { request, result });
+        this.emitter.emit('execution.request.completed', { request, result });
       } else {
         this.emitter.emit('execution.failed', {
           request,
           error: result.error || 'Execution incomplete',
           result,
         });
+        this.emitter.emit('execution.request.failed', {
+          request,
+          error: result.error || 'Execution incomplete',
+          result,
+        });
       }
+
 
       return result;
     } catch (error) {

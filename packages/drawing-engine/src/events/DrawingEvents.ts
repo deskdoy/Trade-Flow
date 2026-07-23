@@ -5,7 +5,12 @@ export type DrawingEventType =
   | 'drawing.updated'
   | 'drawing.deleted'
   | 'drawing.selected'
-  | 'drawing.deselected';
+  | 'drawing.deselected'
+  | 'drawing.object.created'
+  | 'drawing.object.updated'
+  | 'drawing.object.deleted'
+  | 'drawing.object.selected'
+  | 'drawing.object.deselected';
 
 export interface DrawingEventPayloadMap {
   'drawing.created': { drawing: DrawingObject };
@@ -13,6 +18,11 @@ export interface DrawingEventPayloadMap {
   'drawing.deleted': { id: string };
   'drawing.selected': { drawing: DrawingObject | null };
   'drawing.deselected': { drawing: DrawingObject | null };
+  'drawing.object.created': { drawing: DrawingObject };
+  'drawing.object.updated': { drawing: DrawingObject };
+  'drawing.object.deleted': { id: string };
+  'drawing.object.selected': { drawing: DrawingObject | null };
+  'drawing.object.deselected': { drawing: DrawingObject | null };
 }
 
 export type DrawingEventListener<T extends DrawingEventType> = (
