@@ -1,13 +1,18 @@
 import { ReplayDataset } from '../dataset/ReplayDataset.ts';
-import { ReplayPlaybackState } from '../types/index.ts';
+import {
+  ReplayPlaybackState,
+  ReplaySpeed,
+  ReplayCursor,
+  parseReplaySpeed,
+} from '../types/index.ts';
 
 export class ReplayClock {
   private dataset: ReplayDataset;
   private currentIndex: number = -1;
-  private speed: number = 1;
+  private speed: ReplaySpeed | number = '1x';
   private state: ReplayPlaybackState = 'IDLE';
 
-  constructor(dataset: ReplayDataset, speed: number = 1) {
+  constructor(dataset: ReplayDataset, speed: ReplaySpeed | number = '1x') {
     this.dataset = dataset;
     this.speed = speed;
   }
@@ -34,14 +39,16 @@ export class ReplayClock {
     return this.currentIndex;
   }
 
-  public getSpeed(): number {
+  public getSpeed(): ReplaySpeed | number {
     return this.speed;
   }
 
-  public setSpeed(speed: number): void {
-    if (speed > 0) {
-      this.speed = speed;
-    }
+  public getSpeedNumeric(): number {
+    return parseReplaySpeed(this.speed);
+  }
+
+  public setSpeed(speed: ReplaySpeed | number): void {
+    this.speed = speed;
   }
 
   public getState(): ReplayPlaybackState {
@@ -69,7 +76,7 @@ export class ReplayClock {
   }
 
   public resume(): void {
-    if (this.state === 'PAUSED' || this.state === 'STOPPED') {
+    if (this.state === 'PAUSED' || this.state === 'STOPPED' || this.state === 'LOADED') {
       this.state = 'PLAYING';
     }
   }
@@ -125,5 +132,25 @@ export class ReplayClock {
   public reset(): void {
     this.currentIndex = -1;
     this.state = 'IDLE';
+  }
+
+  public getCursor(): ReplayCursor {
+    const total = this.dataset.count();
+    const idx = this.currentIndex;
+    const currentCandle = idx >= 0 ? this.dataset.get(idx) : undefined;
+    const progressPercentage =
+      total > 0 && idx >= 0 ? Math.round(((idx + 1) / total) * 100) : 0;
+    const remainingCandles =
+      total > 0 && idx >= 0 ? Math.max(0, total - (idx + 1)) : total;
+
+    return Object.freeze({
+      index: idx,
+      timestamp: this.getCurrentTime(),
+      progressPercentage,
+      remainingCandles,
+      currentCandle,
+      playbackState: this.state,
+      playbackSpeed: this.speed,
+    });
   }
 }

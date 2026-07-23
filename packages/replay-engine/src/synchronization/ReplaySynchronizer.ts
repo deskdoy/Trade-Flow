@@ -6,6 +6,7 @@ import { StrategyEngine } from '@tradeflow/strategy-engine';
 import { PaperTradingEngine } from '@tradeflow/paper-trading';
 import { PortfolioEngine } from '@tradeflow/portfolio-engine';
 import { ReplayDataset } from '../dataset/ReplayDataset.ts';
+import { ReplaySynchronizationTarget } from '../types/index.ts';
 
 export type SynchronizerStepCallback = (
   candle: Candle,
@@ -14,37 +15,146 @@ export type SynchronizerStepCallback = (
 ) => void;
 
 export class ReplaySynchronizer {
-  private marketDataEngine: MarketDataEngine | null = null;
-  private chartEngine: ChartEngine | null = null;
-  private indicatorEngine: IndicatorEngine | null = null;
-  private strategyEngine: StrategyEngine | null = null;
-  private paperTradingEngine: PaperTradingEngine | null = null;
-  private portfolioEngine: PortfolioEngine | null = null;
-
+  private targets: Map<string, ReplaySynchronizationTarget> = new Map();
   private stepCallbacks: Set<SynchronizerStepCallback> = new Set();
 
+  public registerTarget(target: ReplaySynchronizationTarget): void {
+    if (!target || typeof target.name !== 'string') {
+      throw new Error('Invalid ReplaySynchronizationTarget');
+    }
+    this.targets.set(target.name, target);
+  }
+
+  public unregisterTarget(name: string): void {
+    this.targets.delete(name);
+  }
+
+  public listTargets(): string[] {
+    return Array.from(this.targets.keys());
+  }
+
+  public synchronize(
+    candle: Candle,
+    index: number,
+    history: Candle[],
+    datasetHash: string
+  ): void {
+    for (const target of this.targets.values()) {
+      try {
+        target.synchronize(candle, index, history, datasetHash);
+      } catch (err) {
+        console.error(`[ReplaySynchronizer] Error syncing target ${target.name}:`, err);
+      }
+    }
+  }
+
+  // Backward-compatibility wrappers creating Target plugins
   public registerMarketDataEngine(engine: MarketDataEngine | null): void {
-    this.marketDataEngine = engine;
+    if (!engine) {
+      this.unregisterTarget('MarketData');
+      return;
+    }
+    this.registerTarget({
+      name: 'MarketData',
+      synchronize: (candle) => {
+        const symbol = (candle as any).symbol || 'BTC/USD';
+        const timeframe = (candle as any).timeframe || '1h';
+        const mdAny = engine as any;
+        if (typeof mdAny.emit === 'function') {
+          mdAny.emit('newCandle', { symbol, timeframe, candle });
+        }
+      },
+    });
   }
 
   public registerChartEngine(engine: ChartEngine | null): void {
-    this.chartEngine = engine;
+    if (!engine) {
+      this.unregisterTarget('Chart');
+      return;
+    }
+    this.registerTarget({
+      name: 'Chart',
+      synchronize: (_candle, _index, history) => {
+        engine.setCandles(history);
+      },
+    });
   }
 
   public registerIndicatorEngine(engine: IndicatorEngine | null): void {
-    this.indicatorEngine = engine;
+    if (!engine) {
+      this.unregisterTarget('Indicator');
+      return;
+    }
+    this.registerTarget({
+      name: 'Indicator',
+      synchronize: (candle, _index, history) => {
+        const symbol = (candle as any).symbol || 'BTC/USD';
+        const timeframe = (candle as any).timeframe || '1h';
+        engine.calculateAll(history, symbol, timeframe);
+      },
+    });
   }
 
   public registerStrategyEngine(engine: StrategyEngine | null): void {
-    this.strategyEngine = engine;
+    if (!engine) {
+      this.unregisterTarget('Strategy');
+      return;
+    }
+    this.registerTarget({
+      name: 'Strategy',
+      synchronize: (candle, _index, history) => {
+        const symbol = (candle as any).symbol || 'BTC/USD';
+        const timeframe = (candle as any).timeframe || '1h';
+        engine.evaluate({
+          currentCandle: candle,
+          history,
+          symbol,
+          timeframe,
+          currentTime: candle.time ?? (candle as any).timestamp,
+        } as any);
+      },
+    });
   }
 
   public registerPaperTradingEngine(engine: PaperTradingEngine | null): void {
-    this.paperTradingEngine = engine;
+    if (!engine) {
+      this.unregisterTarget('PaperTrading');
+      return;
+    }
+    this.registerTarget({
+      name: 'PaperTrading',
+      synchronize: (candle) => {
+        const symbol = (candle as any).symbol || 'BTC/USD';
+        engine.processMarketData({
+          symbol,
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+          volume: candle.volume,
+          time: candle.time,
+        } as any);
+      },
+    });
   }
 
   public registerPortfolioEngine(engine: PortfolioEngine | null): void {
-    this.portfolioEngine = engine;
+    if (!engine) {
+      this.unregisterTarget('Portfolio');
+      return;
+    }
+    this.registerTarget({
+      name: 'Portfolio',
+      synchronize: (candle) => {
+        const symbol = (candle as any).symbol || 'BTC/USD';
+        const peAny = engine as any;
+        if (typeof peAny.updateMarketPrices === 'function') {
+          peAny.updateMarketPrices([
+            { symbol, price: candle.close, timestamp: candle.time },
+          ]);
+        }
+      },
+    });
   }
 
   public onStep(callback: SynchronizerStepCallback): () => void {
@@ -54,86 +164,11 @@ export class ReplaySynchronizer {
 
   public sync(candle: Candle, index: number, dataset: ReplayDataset): void {
     if (!candle) return;
-
-    const symbol = (candle as any).symbol || 'BTC/USD';
-    const timeframe = (candle as any).timeframe || '1h';
     const history = dataset.range(0, index + 1);
+    const hash = dataset.datasetHash;
 
-    // 1. Market Data Engine
-    if (this.marketDataEngine) {
-      try {
-        const mdAny = this.marketDataEngine as any;
-        if (typeof mdAny.emit === 'function') {
-          mdAny.emit('newCandle', { symbol, timeframe, candle });
-        }
-      } catch (err) {
-        console.error('[ReplaySynchronizer] Error syncing MarketDataEngine:', err);
-      }
-    }
+    this.synchronize(candle, index, history, hash);
 
-    // 2. Chart Engine
-    if (this.chartEngine) {
-      try {
-        this.chartEngine.setCandles(history);
-      } catch (err) {
-        console.error('[ReplaySynchronizer] Error syncing ChartEngine:', err);
-      }
-    }
-
-    // 3. Indicator Engine
-    if (this.indicatorEngine) {
-      try {
-        this.indicatorEngine.calculateAll(history, symbol, timeframe);
-      } catch (err) {
-        console.error('[ReplaySynchronizer] Error syncing IndicatorEngine:', err);
-      }
-    }
-
-    // 4. Paper Trading Engine
-    if (this.paperTradingEngine) {
-      try {
-        this.paperTradingEngine.processMarketData({
-          symbol,
-          open: candle.open,
-          high: candle.high,
-          low: candle.low,
-          close: candle.close,
-          volume: candle.volume,
-          time: candle.time,
-        } as any);
-      } catch (err) {
-        console.error('[ReplaySynchronizer] Error syncing PaperTradingEngine:', err);
-      }
-    }
-
-    // 5. Strategy Engine
-    if (this.strategyEngine) {
-      try {
-        this.strategyEngine.evaluate({
-          currentCandle: candle,
-          history,
-          symbol,
-          timeframe,
-          currentTime: candle.time ?? (candle as any).timestamp,
-        } as any);
-      } catch (err) {
-        console.error('[ReplaySynchronizer] Error syncing StrategyEngine:', err);
-      }
-    }
-
-    // 6. Portfolio Engine
-    if (this.portfolioEngine) {
-      try {
-        const peAny = this.portfolioEngine as any;
-        if (typeof peAny.updateMarketPrices === 'function') {
-          peAny.updateMarketPrices([{ symbol, price: candle.close, timestamp: candle.time }]);
-        }
-      } catch (err) {
-        console.error('[ReplaySynchronizer] Error syncing PortfolioEngine:', err);
-      }
-    }
-
-    // 7. Custom callbacks
     for (const callback of this.stepCallbacks) {
       try {
         callback(candle, index, history);
@@ -144,12 +179,16 @@ export class ReplaySynchronizer {
   }
 
   public reset(): void {
-    this.marketDataEngine = null;
-    this.chartEngine = null;
-    this.indicatorEngine = null;
-    this.strategyEngine = null;
-    this.paperTradingEngine = null;
-    this.portfolioEngine = null;
+    for (const target of this.targets.values()) {
+      if (typeof target.reset === 'function') {
+        try {
+          target.reset();
+        } catch (err) {
+          console.error(`[ReplaySynchronizer] Error resetting target ${target.name}:`, err);
+        }
+      }
+    }
+    this.targets.clear();
     this.stepCallbacks.clear();
   }
 }

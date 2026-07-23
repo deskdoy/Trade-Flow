@@ -1,12 +1,23 @@
 import { Candle } from '@tradeflow/shared';
-import { ReplayDatasetValidationResult } from '../types/index.ts';
+import { ReplayDatasetValidationResult, ReplayDatasetMetadata } from '../types/index.ts';
 import { ReplayValidator } from '../validation/ReplayValidator.ts';
 
 export class ReplayDataset {
   private candles: Candle[] = [];
   private _hash: string = 'empty-dataset';
+  private _version: string = '1.0.0';
+  private _source: string = 'IN_MEMORY';
+  private _loadedAt: string = new Date().toISOString();
 
-  public load(candles: Candle[]): void {
+  public load(
+    candles: Candle[],
+    source: string = 'IN_MEMORY',
+    version: string = '1.0.0'
+  ): void {
+    this._loadedAt = new Date().toISOString();
+    this._source = source;
+    this._version = version;
+
     if (!candles || !Array.isArray(candles)) {
       this.candles = [];
       this._hash = 'empty-dataset';
@@ -59,6 +70,19 @@ export class ReplayDataset {
 
   public getRawCandles(): readonly Candle[] {
     return this.candles;
+  }
+
+  public getMetadata(): ReplayDatasetMetadata {
+    const firstAny = (this.candles[0] || {}) as any;
+    return {
+      datasetHash: this._hash,
+      datasetVersion: this._version,
+      datasetSource: this._source,
+      loadedAt: this._loadedAt,
+      candleCount: this.candles.length,
+      symbol: firstAny.symbol || 'UNKNOWN',
+      timeframe: firstAny.timeframe || '1h',
+    };
   }
 
   private generateHash(candles: Candle[]): string {

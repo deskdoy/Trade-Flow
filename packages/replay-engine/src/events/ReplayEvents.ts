@@ -1,7 +1,13 @@
 import { Candle } from '@tradeflow/shared';
+import { ReplaySpeed } from '../types/index.ts';
 
 export interface ReplayEventPayloadMap {
-  'replay.started': { timestamp: string; totalCandles: number; speed: number };
+  'replay.started': {
+    timestamp: string;
+    totalCandles: number;
+    speed: ReplaySpeed | number;
+  };
+  'replay.playing': { timestamp: string; currentIndex: number };
   'replay.paused': { timestamp: string; currentIndex: number };
   'replay.resumed': { timestamp: string; currentIndex: number };
   'replay.step': { candle: Candle; index: number; total: number };

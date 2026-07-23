@@ -9,13 +9,22 @@ export { ReplaySnapshot } from './snapshots/ReplaySnapshot.ts';
 export { ReplayValidator } from './validation/ReplayValidator.ts';
 export { ReplayEventEmitter } from './events/ReplayEvents.ts';
 
+export { parseReplaySpeed, formatReplaySpeed } from './types/index.ts';
+
 export type {
   ReplayPlaybackState,
   ReplayPlaybackMode,
+  ReplaySpeed,
   ReplayConfig,
   ReplayProgressData,
   ReplaySnapshotData,
   ReplayDatasetValidationResult,
+  ReplayCursor,
+  ReplaySession,
+  ReplayStatistics,
+  ReplayDatasetMetadata,
+  ReplaySynchronizationTarget,
+  StateTransitionResult,
 } from './types/index.ts';
 
 export type {

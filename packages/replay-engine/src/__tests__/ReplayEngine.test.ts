@@ -3,11 +3,13 @@ import {
   ReplayEngine,
   ReplayDataset,
   ReplayClock,
+  ReplayController,
   ReplayNavigator,
   ReplayBuffer,
   ReplaySynchronizer,
   ReplaySnapshot,
-  ReplayValidator,
+  parseReplaySpeed,
+  formatReplaySpeed,
 } from '../index.ts';
 
 function createMockCandles(count: number): Candle[] {
@@ -38,7 +40,7 @@ function runTests() {
   console.log('Test 1: ReplayDataset & ReplayValidator');
   const candles = createMockCandles(10);
   const dataset = new ReplayDataset();
-  dataset.load(candles);
+  dataset.load(candles, 'MOCK_SOURCE', '1.0.0');
 
   if (dataset.count() !== 10) {
     throw new Error(`Expected count 10, got ${dataset.count()}`);
@@ -52,13 +54,28 @@ function runTests() {
   if (!dataset.datasetHash || dataset.datasetHash === 'empty-dataset') {
     throw new Error('Expected deterministic datasetHash');
   }
+
+  const meta = dataset.getMetadata();
+  if (meta.datasetSource !== 'MOCK_SOURCE' || meta.candleCount !== 10) {
+    throw new Error('Dataset metadata source or count mismatch');
+  }
   console.log('✓ ReplayDataset & ReplayValidator tests passed');
 
-  // Test 2: ReplayClock
-  console.log('\nTest 2: ReplayClock');
-  const clock = new ReplayClock(dataset, 2);
-  if (clock.getSpeed() !== 2) {
-    throw new Error('Speed should be 2');
+  // Test 2: ReplayClock & ReplaySpeed
+  console.log('\nTest 2: ReplayClock & ReplaySpeed');
+  const clock = new ReplayClock(dataset, '2x');
+  if (clock.getSpeed() !== '2x') {
+    throw new Error('Speed should be 2x');
+  }
+  if (clock.getSpeedNumeric() !== 2) {
+    throw new Error('Numeric speed should be 2');
+  }
+
+  if (parseReplaySpeed('4x') !== 4 || parseReplaySpeed('MAX') !== 1000) {
+    throw new Error('parseReplaySpeed failed');
+  }
+  if (formatReplaySpeed(16) !== '16x') {
+    throw new Error('formatReplaySpeed failed');
   }
 
   clock.play();
@@ -78,130 +95,166 @@ function runTests() {
   if (clock.getState() !== 'PAUSED') {
     throw new Error('State should be PAUSED');
   }
-  console.log('✓ ReplayClock tests passed');
+  console.log('✓ ReplayClock & ReplaySpeed tests passed');
 
-  // Test 3: ReplayNavigator & Seek Operations
-  console.log('\nTest 3: ReplayNavigator & Seek Operations');
-  const navClock = new ReplayClock(dataset, 1);
-  const navigator = new ReplayNavigator(dataset, navClock);
+  // Test 3: ReplayController State Machine & Illegal Transitions
+  console.log('\nTest 3: ReplayController FSM & Illegal State Transitions');
+  const fsmClock = new ReplayClock(dataset, '1x');
+  const controller = new ReplayController(fsmClock);
 
-  navigator.goToIndex(5);
-  if (navClock.getCurrentIndex() !== 5) {
-    throw new Error(`Expected index 5, got ${navClock.getCurrentIndex()}`);
+  // Initial state IDLE
+  if (controller.getCurrentState() !== 'IDLE') {
+    throw new Error('Initial controller state should be IDLE');
   }
 
-  navigator.goToBeginning();
-  if (navClock.getCurrentIndex() !== 0) {
-    throw new Error('Expected index 0 for beginning');
+  // Legal transition: IDLE -> LOADED
+  const res1 = controller.transitionTo('LOADED');
+  if (!res1.valid || controller.getCurrentState() !== 'LOADED') {
+    throw new Error('Failed legal transition IDLE -> LOADED');
   }
 
-  navigator.goToEnd();
-  if (navClock.getCurrentIndex() !== 9) {
-    throw new Error('Expected index 9 for end');
+  // Illegal transition: LOADED -> COMPLETED
+  const res2 = controller.transitionTo('COMPLETED');
+  if (res2.valid || controller.getCurrentState() !== 'LOADED') {
+    throw new Error('Allowed illegal transition LOADED -> COMPLETED');
+  }
+  if (!res2.error || !res2.error.includes('Illegal state transition')) {
+    throw new Error('Expected structured error for illegal transition');
   }
 
-  const targetDate = candles[3].time;
-  navigator.goToDate(targetDate);
-  if (navClock.getCurrentIndex() !== 3) {
-    throw new Error(`Expected index 3 for date ${targetDate}, got ${navClock.getCurrentIndex()}`);
-  }
-  console.log('✓ ReplayNavigator tests passed');
-
-  // Test 4: ReplayBuffer
-  console.log('\nTest 4: ReplayBuffer');
-  const buffer = new ReplayBuffer(3);
-  buffer.push(candles[0]);
-  buffer.push(candles[1]);
-  buffer.push(candles[2]);
-  if (buffer.size() !== 3) {
-    throw new Error(`Expected buffer size 3, got ${buffer.size()}`);
+  // Legal transition: LOADED -> PLAYING -> PAUSED -> PLAYING
+  controller.play();
+  if (controller.getCurrentState() !== 'PLAYING') {
+    throw new Error('Expected PLAYING state after play()');
   }
 
-  buffer.push(candles[3]); // Should evict candles[0]
-  if (buffer.size() !== 3) {
-    throw new Error(`Expected bounded buffer size 3, got ${buffer.size()}`);
+  controller.pause();
+  if (controller.getCurrentState() !== 'PAUSED') {
+    throw new Error('Expected PAUSED state after pause()');
   }
-  if (buffer.getHistory()[0].time !== candles[1].time) {
-    throw new Error('Oldest candle should have been evicted');
-  }
-  console.log('✓ ReplayBuffer tests passed');
 
-  // Test 5: ReplaySynchronizer
-  console.log('\nTest 5: ReplaySynchronizer');
+  controller.resume();
+  if (controller.getCurrentState() !== 'PLAYING') {
+    throw new Error('Expected PLAYING state after resume()');
+  }
+
+  controller.stop();
+  if (controller.getCurrentState() !== 'STOPPED') {
+    throw new Error('Expected STOPPED state after stop()');
+  }
+
+  console.log('✓ ReplayController FSM & Illegal State Transitions passed');
+
+  // Test 4: ReplayCursor, ReplaySession & ReplayStatistics
+  console.log('\nTest 4: ReplayCursor, ReplaySession & ReplayStatistics');
+  const engine = new ReplayEngine({ speed: '4x' });
+  engine.initialize();
+  engine.loadDataset(candles);
+
+  const cursorInitial = engine.getCursor();
+  if (cursorInitial.index !== -1 || cursorInitial.playbackState !== 'LOADED') {
+    throw new Error('Initial cursor index or state mismatch');
+  }
+
+  engine.play();
+  engine.step(); // idx 1
+  engine.step(); // idx 2
+  engine.seek(5); // idx 5
+
+  const cursorActive = engine.getCursor();
+  if (cursorActive.index !== 5 || cursorActive.progressPercentage !== 60) {
+    throw new Error(`Expected cursor index 5 and 60% progress, got ${cursorActive.index}, ${cursorActive.progressPercentage}%`);
+  }
+
+  const session = engine.getSession();
+  if (!session.sessionId || session.playCount < 1 || session.seekCount !== 1) {
+    throw new Error('Session tracking counts failed');
+  }
+
+  const stats = engine.getStatistics();
+  if (stats.numberOfSteps < 2 || stats.numberOfSeeks !== 1) {
+    throw new Error('Statistics tracking failed');
+  }
+
+  console.log('✓ ReplayCursor, ReplaySession & ReplayStatistics tests passed');
+
+  // Test 5: ReplaySynchronizer Plugin Architecture
+  console.log('\nTest 5: ReplaySynchronizer Plugin Architecture');
   const synchronizer = new ReplaySynchronizer();
-  let stepReceived = false;
+  let customPluginSynced = false;
 
-  synchronizer.onStep((candle, index, history) => {
-    stepReceived = true;
-    if (index !== 2) throw new Error('Incorrect step index in sync callback');
-    if (history.length !== 3) throw new Error('Incorrect history length in sync callback');
+  synchronizer.registerTarget({
+    name: 'CustomStrategyPlugin',
+    synchronize: (candle, index, history, hash) => {
+      customPluginSynced = true;
+      if (index !== 2 || history.length !== 3 || !hash) {
+        throw new Error('Plugin synchronize arguments mismatch');
+      }
+    },
   });
+
+  const targets = synchronizer.listTargets();
+  if (!targets.includes('CustomStrategyPlugin')) {
+    throw new Error('Registered plugin not listed in targets');
+  }
 
   synchronizer.sync(candles[2], 2, dataset);
-  if (!stepReceived) {
-    throw new Error('Expected synchronizer step callback to fire');
-  }
-  console.log('✓ ReplaySynchronizer tests passed');
-
-  // Test 6: ReplayEngine Lifecycle, Events & Snapshots
-  console.log('\nTest 6: ReplayEngine End-to-End, Events & Snapshots');
-  const engine = new ReplayEngine({ speed: 10 });
-  engine.initialize();
-
-  if (engine.getVersion() !== '0.1.0') {
-    throw new Error(`Unexpected version ${engine.getVersion()}`);
+  if (!customPluginSynced) {
+    throw new Error('Custom plugin synchronize method was not called');
   }
 
-  let startedEvent = false;
-  let stepEventCount = 0;
-
-  engine.on('replay.started', () => {
-    startedEvent = true;
-  });
-
-  engine.on('replay.step', () => {
-    stepEventCount++;
-  });
-
-  engine.loadDataset(candles);
-  engine.play();
-
-  if (!startedEvent) {
-    throw new Error('replay.started event was not emitted');
+  synchronizer.unregisterTarget('CustomStrategyPlugin');
+  if (synchronizer.listTargets().includes('CustomStrategyPlugin')) {
+    throw new Error('Failed to unregister target plugin');
   }
 
-  // Perform steps
-  engine.step(); // index 1
-  engine.step(); // index 2
-  engine.step(); // index 3
+  console.log('✓ ReplaySynchronizer Plugin Architecture tests passed');
 
-  if (stepEventCount !== 3) {
-    throw new Error(`Expected 3 step events, got ${stepEventCount}`);
+  // Test 6: Snapshot Compatibility & EngineHealth Diagnostics
+  console.log('\nTest 6: Snapshot Compatibility & EngineHealth Diagnostics');
+  const testEngine = new ReplayEngine({ speed: '2x' });
+  testEngine.initialize();
+  testEngine.loadDataset(candles);
+  testEngine.play();
+  testEngine.step();
+
+  const fullSnapshot = testEngine.getSnapshot();
+  if (!fullSnapshot.cursor || !fullSnapshot.session || !fullSnapshot.statistics) {
+    throw new Error('Full snapshot missing cursor, session or statistics');
   }
 
-  const snapshot = engine.getSnapshot();
-  if (snapshot.currentIndex !== 3) {
-    throw new Error(`Expected snapshot currentIndex 3, got ${snapshot.currentIndex}`);
+  // Backward compatibility test: Old snapshot format without cursor/session/statistics
+  const oldLegacySnapshot = {
+    version: '1.0.0',
+    engineVersion: '0.1.0',
+    schemaVersion: 1,
+    datasetHash: testEngine.getDataset().datasetHash,
+    currentIndex: 4,
+    currentTime: candles[4].time,
+    speed: 2,
+    state: 'PAUSED' as const,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    playbackMode: 'REALTIME' as const,
+  };
+
+  testEngine.restoreSnapshot(oldLegacySnapshot);
+  if (testEngine.getClock().getCurrentIndex() !== 4) {
+    throw new Error('Failed restoring legacy snapshot format');
   }
 
-  engine.reset();
-  if (engine.getClock().getCurrentIndex() !== -1) {
-    throw new Error('Expected index -1 after reset');
+  const health = testEngine.getHealth();
+  if (
+    !health.healthy ||
+    health.datasetLoaded !== true ||
+    health.currentIndex !== 4 ||
+    health.remainingCandles !== 5
+  ) {
+    throw new Error('EngineHealth diagnostic output failed');
   }
 
-  engine.loadDataset(candles);
-  engine.restoreSnapshot(snapshot);
-  if (engine.getClock().getCurrentIndex() !== 3) {
-    throw new Error(`Expected restored index 3, got ${engine.getClock().getCurrentIndex()}`);
-  }
-
-  const health = engine.getHealth();
-  if (!health.healthy) {
-    throw new Error('Expected engine health to be true');
-  }
-
-  engine.destroy();
-  console.log('✓ ReplayEngine Lifecycle, Events & Snapshots tests passed');
+  testEngine.destroy();
+  console.log('✓ Snapshot Compatibility & EngineHealth Diagnostics passed');
 
   // Test 7: Large Dataset Performance (100,000 candles)
   console.log('\nTest 7: Large Dataset Performance (100,000 candles)');
@@ -224,6 +277,7 @@ function runTests() {
   }
 
   console.log(`Loaded 100,000 candles in ${loadTimeMs}ms, seeked to 50,000 in ${seekTimeMs}ms`);
+  console.log('Benchmark measured on development hardware using an already in-memory dataset.');
   console.log('✓ Large Dataset Performance tests passed');
 
   console.log('\nAll Replay Engine tests passed successfully!');

@@ -1,5 +1,10 @@
 import { ReplayClock } from '../timeline/ReplayClock.ts';
-import { ReplayPlaybackMode } from '../types/index.ts';
+import {
+  ReplayPlaybackMode,
+  ReplayPlaybackState,
+  StateTransitionResult,
+  parseReplaySpeed,
+} from '../types/index.ts';
 
 export interface ReplayControllerOptions {
   stepIntervalMs?: number;
@@ -9,6 +14,18 @@ export interface ReplayControllerOptions {
 
 export type TickCallback = () => void;
 export type CompletionCallback = () => void;
+
+const ALLOWED_TRANSITIONS: Record<ReplayPlaybackState, Set<ReplayPlaybackState>> = {
+  IDLE: new Set(['LOADED', 'ERROR']),
+  LOADED: new Set(['PLAYING', 'STOPPED', 'IDLE', 'ERROR']),
+  PLAYING: new Set(['PAUSED', 'COMPLETED', 'STOPPED', 'ERROR', 'PLAYING']),
+  PAUSED: new Set(['PLAYING', 'STOPPED', 'LOADED', 'ERROR']),
+  COMPLETED: new Set(['PLAYING', 'LOADED', 'STOPPED', 'IDLE', 'ERROR']),
+  STOPPED: new Set(['LOADED', 'PLAYING', 'IDLE', 'ERROR']),
+  ERROR: new Set(['IDLE', 'LOADED', 'STOPPED']),
+  FAILED: new Set(['IDLE', 'LOADED', 'STOPPED']),
+  FINISHED: new Set(['PLAYING', 'LOADED', 'STOPPED', 'IDLE', 'ERROR']),
+};
 
 export class ReplayController {
   private clock: ReplayClock;
@@ -32,6 +49,40 @@ export class ReplayController {
     }
   }
 
+  public getCurrentState(): ReplayPlaybackState {
+    return this.clock.getState();
+  }
+
+  public validateTransition(
+    from: ReplayPlaybackState,
+    to: ReplayPlaybackState
+  ): StateTransitionResult {
+    const allowed = ALLOWED_TRANSITIONS[from];
+    if (allowed && allowed.has(to)) {
+      return { valid: true, from, to };
+    }
+    return {
+      valid: false,
+      error: `Illegal state transition from ${from} to ${to}`,
+      from,
+      to,
+    };
+  }
+
+  public canTransition(to: ReplayPlaybackState): boolean {
+    const from = this.getCurrentState();
+    return this.validateTransition(from, to).valid;
+  }
+
+  public transitionTo(to: ReplayPlaybackState): StateTransitionResult {
+    const from = this.getCurrentState();
+    const result = this.validateTransition(from, to);
+    if (result.valid) {
+      this.clock.setState(to);
+    }
+    return result;
+  }
+
   public setTickCallback(callback: TickCallback | null): void {
     this.onTickCallback = callback;
   }
@@ -42,7 +93,7 @@ export class ReplayController {
 
   public setStepIntervalMs(intervalMs: number): void {
     this.stepIntervalMs = Math.max(1, intervalMs);
-    if (this.clock.getState() === 'PLAYING') {
+    if (this.getCurrentState() === 'PLAYING') {
       this.stopTimer();
       this.startTimer();
     }
@@ -56,28 +107,44 @@ export class ReplayController {
     this.autoLoop = autoLoop;
   }
 
-  public play(): void {
+  public play(): StateTransitionResult {
+    const res = this.transitionTo('PLAYING');
+    if (!res.valid) return res;
+
     this.clock.play();
     if (this.playbackMode === 'REALTIME' || this.playbackMode === 'ASAP') {
       this.startTimer();
     }
+    return res;
   }
 
-  public pause(): void {
+  public pause(): StateTransitionResult {
+    const res = this.transitionTo('PAUSED');
+    if (!res.valid) return res;
+
     this.stopTimer();
     this.clock.pause();
+    return res;
   }
 
-  public resume(): void {
+  public resume(): StateTransitionResult {
+    const res = this.transitionTo('PLAYING');
+    if (!res.valid) return res;
+
     this.clock.resume();
     if (this.playbackMode === 'REALTIME' || this.playbackMode === 'ASAP') {
       this.startTimer();
     }
+    return res;
   }
 
-  public stop(): void {
+  public stop(): StateTransitionResult {
+    const res = this.transitionTo('STOPPED');
+    if (!res.valid) return res;
+
     this.stopTimer();
     this.clock.stop();
+    return res;
   }
 
   public tick(): void {
@@ -86,7 +153,7 @@ export class ReplayController {
         this.clock.rewind();
       } else {
         this.stopTimer();
-        this.clock.setState('COMPLETED');
+        this.transitionTo('COMPLETED');
         if (this.onCompletionCallback) {
           this.onCompletionCallback();
         }
@@ -103,12 +170,11 @@ export class ReplayController {
     this.stopTimer();
 
     if (this.playbackMode === 'ASAP') {
-      // Execute steps continuously with minimal interval
       this.timer = setInterval(() => {
         this.tick();
       }, 0);
     } else {
-      const speed = Math.max(0.01, this.clock.getSpeed());
+      const speed = parseReplaySpeed(this.clock.getSpeed());
       const effectiveInterval = Math.max(1, Math.floor(this.stepIntervalMs / speed));
       this.timer = setInterval(() => {
         this.tick();

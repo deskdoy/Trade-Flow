@@ -1,4 +1,13 @@
-import { ReplaySnapshotData, ReplayPlaybackState, ReplayPlaybackMode } from '../types/index.ts';
+import {
+  ReplaySnapshotData,
+  ReplayPlaybackState,
+  ReplayPlaybackMode,
+  ReplaySpeed,
+  ReplayCursor,
+  ReplaySession,
+  ReplayStatistics,
+  ReplayDatasetMetadata,
+} from '../types/index.ts';
 
 export class ReplaySnapshot {
   public static create(params: {
@@ -8,10 +17,14 @@ export class ReplaySnapshot {
     datasetHash: string;
     currentIndex: number;
     currentTime?: string;
-    speed: number;
+    speed: ReplaySpeed | number;
     state: ReplayPlaybackState;
     playbackMode?: ReplayPlaybackMode;
     createdAt?: string;
+    cursor?: ReplayCursor;
+    session?: ReplaySession;
+    statistics?: ReplayStatistics;
+    metadata?: ReplayDatasetMetadata;
   }): ReplaySnapshotData {
     const now = new Date().toISOString();
     return {
@@ -26,6 +39,10 @@ export class ReplaySnapshot {
       createdAt: params.createdAt ?? now,
       updatedAt: now,
       playbackMode: params.playbackMode ?? 'REALTIME',
+      cursor: params.cursor,
+      session: params.session,
+      statistics: params.statistics,
+      metadata: params.metadata,
     };
   }
 
@@ -33,7 +50,8 @@ export class ReplaySnapshot {
     if (!snapshot || typeof snapshot !== 'object') return false;
     if (typeof snapshot.datasetHash !== 'string') return false;
     if (typeof snapshot.currentIndex !== 'number') return false;
-    if (typeof snapshot.speed !== 'number') return false;
+    if (typeof snapshot.speed !== 'number' && typeof snapshot.speed !== 'string')
+      return false;
     return true;
   }
 }
