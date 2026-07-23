@@ -63,6 +63,12 @@
       ],
       "@tradeflow/strategy-engine": [
         "./packages/strategy-engine/src/index.ts"
+      ],
+      "@tradeflow/backtesting-engine": [
+        "./packages/backtesting-engine/src/index.ts"
+      ],
+      "@tradeflow/optimization-engine": [
+        "./packages/optimization-engine/src/index.ts"
       ]
     },
     "allowImportingTsExtensions": true,

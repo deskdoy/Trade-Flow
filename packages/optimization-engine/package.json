@@ -1,0 +1,19 @@
+{
+  "name": "@tradeflow/optimization-engine",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "test": "tsx src/__tests__/OptimizationEngine.test.ts"
+  },
+  "dependencies": {
+    "@tradeflow/backtesting-engine": "workspace:*",
+    "@tradeflow/core": "workspace:*",
+    "@tradeflow/shared": "workspace:*",
+    "@tradeflow/strategy-engine": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}
